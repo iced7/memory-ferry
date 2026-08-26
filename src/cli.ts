@@ -17,10 +17,7 @@ const HELP = `Agent Vault Sync ${VERSION}
 Local-first long-term memory shared through iCloud, OneDrive, NAS, or any synced folder.
 
 Usage:
-  agent-vault init <folder> [--name <name>] [--encrypt] [--passphrase <pw>]
-  agent-vault encrypt <folder> --passphrase <pw>
-  agent-vault unlock <folder> --passphrase <pw>
-  agent-vault lock <folder>
+  agent-vault init <folder> [--name <name>]
   agent-vault use <folder>
   agent-vault vaults list
   agent-vault vaults remove <folder>
@@ -52,7 +49,7 @@ interface Parsed { positionals: string[]; flags: Map<string, string[]>; }
 function parse(argv: string[]): Parsed {
   const positionals: string[] = [];
   const flags = new Map<string, string[]>();
-  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic", "encrypt"]);
+  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic"]);
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index];
     if (!token.startsWith("--") && token !== "-h") { positionals.push(token); continue; }
@@ -84,37 +81,6 @@ function requireArg(value: string | undefined, label: string): string {
   return value;
 }
 
-async function promptPassphrase(): Promise<string> {
-  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
-    throw new Error('Passphrase is required in non-interactive mode. Pass --passphrase <pw>.')
-  }
-  process.stderr.write('Passphrase: ')
-  const wasRaw = process.stdin.isRaw
-  process.stdin.setRawMode(true)
-  process.stdin.resume()
-  return await new Promise<string>((resolve, reject) => {
-    let passphrase = ''
-    const finish = (error?: Error) => {
-      process.stdin.off('data', onData)
-      process.stdin.setRawMode(Boolean(wasRaw))
-      process.stdin.pause()
-      process.stderr.write('\n')
-      if (error) reject(error)
-      else if (!passphrase) reject(new Error('Passphrase cannot be empty.'))
-      else resolve(passphrase)
-    }
-    const onData = (chunk: Buffer | string) => {
-      for (const character of chunk.toString()) {
-        if (character === '\u0003') return finish(new Error('Passphrase entry cancelled.'))
-        if (character === '\r' || character === '\n') return finish()
-        if (character === '\u007f' || character === '\b') passphrase = [...passphrase].slice(0, -1).join('')
-        else passphrase += character
-      }
-    }
-    process.stdin.on('data', onData)
-  })
-}
-
 async function selectedVault(parsed: Parsed, state: StateStore): Promise<Vault> {
   return new Vault(await state.resolveVault(flag(parsed, "vault")), state);
 }
@@ -130,36 +96,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   if (command === "init") {
     const folder = requireArg(subcommand, "vault folder");
-    const encryption = parsed.flags.has('encrypt')
-      ? { passphrase: flag(parsed, 'passphrase') || await promptPassphrase() }
-      : undefined
-    const vault = await Vault.init(folder, flag(parsed, "name") || path.basename(path.resolve(folder)), state, {}, encryption);
+    const vault = await Vault.init(folder, flag(parsed, "name") || path.basename(path.resolve(folder)), state);
     print({ initialized: true, path: vault.root, manifest: await vault.manifest() }, wantsJson);
     return;
-  }
-  if (command === 'encrypt') {
-    const folder = requireArg(subcommand, 'vault folder')
-    const passphrase = requireArg(flag(parsed, 'passphrase'), '--passphrase')
-    console.warn('WARNING: Run this only when all other devices have finished syncing this vault; do not run on both machines simultaneously.')
-    const vault = new Vault(folder, state)
-    await vault.encrypt(passphrase)
-    print({ encrypted: true, path: vault.root, manifest: await vault.manifest() }, wantsJson)
-    return
-  }
-  if (command === 'unlock') {
-    const folder = requireArg(subcommand, 'vault folder')
-    const passphrase = requireArg(flag(parsed, 'passphrase'), '--passphrase')
-    const vault = new Vault(folder, state)
-    await vault.unlock(passphrase)
-    print({ unlocked: true, path: vault.root }, wantsJson)
-    return
-  }
-  if (command === 'lock') {
-    const folder = requireArg(subcommand, 'vault folder')
-    const vault = new Vault(folder, state)
-    await vault.lock()
-    print({ locked: true, path: vault.root }, wantsJson)
-    return
   }
   if (command === "use") {
     const folder = path.resolve(requireArg(subcommand, "vault folder"));
@@ -193,8 +132,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const vault = await selectedVault(parsed, state);
   if (command === "mcp") { await runMcp(vault); return; }
   if (command === "status") {
-    const status = await vault.status()
-    print({ path: vault.root, manifest: await vault.manifest(), ...status, skills: await listSkills(vault.root) }, wantsJson); return;
+    print({ path: vault.root, manifest: await vault.manifest(), memories: (await vault.current()).size, events: (await vault.events()).length, skills: await listSkills(vault.root) }, wantsJson); return;
   }
   if (command === "remember") {
     const content = [subcommand, ...rest].filter(Boolean).join(" ");

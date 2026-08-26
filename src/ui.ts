@@ -112,13 +112,13 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   if (vaultPath) {
     try {
       const instance = new Vault(vaultPath, options.state);
-      const [manifest, events, status, skills] = await Promise.all([instance.manifest(), instance.events(), instance.status(), listSkills(vaultPath)]);
+      const [manifest, events, current, skills] = await Promise.all([instance.manifest(), instance.events(), instance.current(), listSkills(vaultPath)]);
       let writable = true;
       try { await access(vaultPath, constants.R_OK | constants.W_OK); } catch { writable = false; }
       const latest = events.at(-1);
       vault = {
         path: vaultPath, manifest, provider: providerFor(vaultPath, options.platform), writable,
-        memories: status.memories, events: status.events, encrypted: status.encrypted, unlocked: status.unlocked, skills: skills.length,
+        memories: current.size, events: events.length, skills: skills.length,
         latestEventAt: latest?.createdAt, latestDeviceId: latest?.deviceId
       };
     } catch (error) {

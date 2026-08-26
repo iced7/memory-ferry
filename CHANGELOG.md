@@ -2,7 +2,6 @@
 
 ## 0.5.0 - Unreleased
 
-- Optional at-rest encryption (`init --encrypt` / `encrypt` / `unlock` / `lock`), keyring outside the synced folder, plaintext vaults fully backward compatible.
 - Optional semantic recall via local Ollama embeddings (`AGENT_VAULT_EMBED_MODEL`, `AGENT_VAULT_EMBED=off` to disable), hybrid scoring with text fallback.
 - append() no longer rescans the full event log (recent-clock window from file names), sequential writes are no longer quadratic.
 - Added a fingerprint-based local event cache (no full re-parse per operation).

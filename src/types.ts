@@ -30,16 +30,6 @@ export interface MemoryEvent {
   createdAt: string;
   deviceId: string;
   record?: MemoryRecord;
-  ciphertext?: string;
-}
-
-export interface VaultEncryption {
-  algo: 'chacha20-poly1305' | 'aes-256-gcm'
-  kdf: 'scrypt'
-  salt: string
-  N: number
-  r: number
-  p: number
 }
 
 export interface VaultManifest {
@@ -48,7 +38,6 @@ export interface VaultManifest {
   name: string;
   createdAt: string;
   format: "agent-vault-events";
-  encryption?: VaultEncryption
 }
 
 export interface LocalState {
