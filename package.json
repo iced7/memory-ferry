@@ -1,0 +1,51 @@
+{
+  "name": "agent-vault-sync",
+  "version": "0.4.0",
+  "description": "Local-first, folder-synced long-term memory and reusable skills for AI agents.",
+  "type": "module",
+  "bin": {
+    "agent-vault": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:exe:win": "npm run build && node scripts/build-windows-exe.mjs",
+    "dev": "tsx src/cli.ts",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "test:all": "npm run build && npm test",
+    "prepack": "npm run test:all"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "agent",
+    "memory",
+    "mcp",
+    "skills",
+    "local-first"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.22.0",
+    "@types/node": "^22.15.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

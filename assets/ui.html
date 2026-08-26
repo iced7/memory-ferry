@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Vault 控制台</title>
+  <style nonce="__CSP_NONCE__">
+    :root { color-scheme: light; --bg:#f4f6f3; --panel:#fff; --ink:#17201b; --muted:#66716a; --line:#dce2dd; --green:#176b45; --green-soft:#e3f3ea; --amber:#8a5a08; --amber-soft:#fff3d6; --red:#a23d32; --red-soft:#fae9e6; --blue:#245d8b; --shadow:0 12px 34px rgba(27,43,34,.08); }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+    button,input { font:inherit; }
+    button { cursor:pointer; }
+    .shell { max-width:1180px; margin:0 auto; padding:28px 24px 60px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:26px; }
+    .brand { display:flex; align-items:center; gap:14px; }
+    .logo { width:46px; height:46px; border-radius:14px; display:grid; place-items:center; background:#173f2d; color:white; font-weight:800; letter-spacing:-1px; box-shadow:var(--shadow); }
+    h1 { margin:0; font-size:23px; letter-spacing:-.4px; }
+    .subtitle { color:var(--muted); margin-top:2px; }
+    .toolbar { display:flex; align-items:center; gap:10px; }
+    .live { display:flex; align-items:center; gap:7px; color:var(--muted); }
+    .live i { width:8px; height:8px; border-radius:50%; background:#20a568; box-shadow:0 0 0 4px #dff4e9; }
+    .button { border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:8px 12px; font-weight:650; transition:.15s ease; }
+    .button:hover { border-color:#aeb8b1; transform:translateY(-1px); }
+    .button.primary { background:#173f2d; border-color:#173f2d; color:#fff; }
+    .button.danger { color:var(--red); background:#fff; }
+    .button:disabled { cursor:not-allowed; opacity:.45; transform:none; }
+    .grid { display:grid; grid-template-columns:1.12fr .88fr; gap:18px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
+    .panel-head { padding:19px 20px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid #edf0ed; }
+    .panel-head h2 { margin:0; font-size:16px; }
+    .panel-body { padding:20px; }
+    .status-line { display:flex; gap:13px; align-items:flex-start; }
+    .provider-icon { width:48px; height:48px; flex:0 0 auto; display:grid; place-items:center; border-radius:13px; background:#eaf0ec; font-size:22px; }
+    .provider-title { font-size:17px; font-weight:760; }
+    .path { color:var(--muted); word-break:break-all; margin-top:3px; }
+    .badges { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
+    .badge { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:4px 8px; background:#eef1ef; color:#59645d; font-size:12px; font-weight:700; }
+    .badge.ok { background:var(--green-soft); color:var(--green); }
+    .badge.warn { background:var(--amber-soft); color:var(--amber); }
+    .badge.off { background:var(--red-soft); color:var(--red); }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:20px; }
+    .stat { border:1px solid var(--line); border-radius:11px; padding:12px; background:#fafbfa; }
+    .stat strong { display:block; font-size:20px; line-height:1.2; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .meta { margin-top:16px; padding-top:14px; border-top:1px solid #edf0ed; display:grid; gap:7px; color:var(--muted); font-size:13px; }
+    .meta b { color:var(--ink); }
+    .empty { text-align:center; padding:22px 10px 8px; }
+    .empty-mark { width:54px; height:54px; display:grid; place-items:center; margin:0 auto 12px; border-radius:50%; background:#eef1ef; color:var(--muted); font-size:24px; }
+    .empty h3 { margin:0 0 4px; }
+    .empty p { margin:0 auto 18px; color:var(--muted); max-width:390px; }
+    .connect-form { display:grid; gap:10px; margin-top:14px; text-align:left; }
+    .field-row { display:flex; gap:8px; }
+    .field { width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:#fff; color:var(--ink); outline:none; }
+    .field:focus { border-color:#50856c; box-shadow:0 0 0 3px #e5f0ea; }
+    .check { display:flex; gap:8px; color:var(--muted); align-items:center; font-size:13px; }
+    .notice { margin-top:18px; border:1px solid #efdcae; background:#fff8e8; color:#6f531a; border-radius:11px; padding:12px 14px; }
+    .vault-list { display:grid; gap:9px; margin-bottom:16px; }
+    .vault-row { border:1px solid var(--line); border-radius:11px; padding:11px; display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+    .vault-row-name { font-weight:760; }
+    .vault-row-actions { display:flex; gap:6px; }
+    .section-label { margin:16px 0 8px; padding-top:14px; border-top:1px solid #edf0ed; font-weight:760; }
+    .agents { grid-column:1/-1; }
+    .agent-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .agent { border:1px solid var(--line); border-radius:13px; padding:15px; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; }
+    .agent-icon { width:39px; height:39px; display:grid; place-items:center; border-radius:11px; background:#eef1ef; font-size:12px; font-weight:800; color:#405047; }
+    .agent-name { font-weight:760; }
+    .agent-detail { color:var(--muted); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:360px; }
+    .agent-actions { display:flex; align-items:center; gap:7px; }
+    .small { padding:6px 9px; font-size:12px; }
+    .security { grid-column:1/-1; display:flex; align-items:flex-start; gap:12px; padding:15px 17px; border:1px solid #ecd9af; background:#fffaf0; border-radius:13px; color:#6b5321; }
+    .security strong { display:block; color:#4b3a17; }
+    .toast { position:fixed; right:22px; bottom:22px; max-width:380px; background:#16251d; color:#fff; padding:12px 15px; border-radius:11px; box-shadow:0 16px 40px rgba(0,0,0,.22); transform:translateY(18px); opacity:0; pointer-events:none; transition:.2s ease; }
+    .toast.show { transform:none; opacity:1; }
+    .toast.error { background:#8a2e27; }
+    .loading { opacity:.58; pointer-events:none; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr; } .agent-grid { grid-template-columns:1fr; } .stats { grid-template-columns:repeat(2,1fr); } header { align-items:flex-start; } .live { display:none; } }
+    @media (max-width:520px) { .shell { padding:20px 14px 40px; } h1 { font-size:19px; } .toolbar .button { padding:7px 9px; } .agent { grid-template-columns:auto 1fr; } .agent-actions { grid-column:1/-1; justify-content:flex-end; } .field-row { flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <main class="shell" id="app">
+    <header>
+      <div class="brand"><div class="logo">AV</div><div><h1>Agent Vault 控制台</h1><div class="subtitle">本机记忆、网盘目录与 Agent 接入管理</div></div></div>
+      <div class="toolbar"><div class="live"><i></i>仅本机运行</div><button class="button" id="refresh">刷新状态</button></div>
+    </header>
+    <div class="grid">
+      <section class="panel" id="vault-panel"><div class="panel-head"><h2>Vault 与同步目录</h2><span class="badge" id="vault-badge">检查中</span></div><div class="panel-body" id="vault-content"></div></section>
+      <section class="panel"><div class="panel-head"><h2>我的 Vault</h2><span class="badge ok">多 Vault 管理</span></div><div class="panel-body">
+        <div class="vault-list" id="vault-list"></div>
+        <label class="check"><input type="checkbox" id="auto-manage"> 切换时自动刷新已接入 Agent；每 15 秒同步 Skill</label>
+        <div class="section-label">手动迁移</div>
+        <div class="connect-form">
+          <select class="field" id="migrate-source"></select>
+          <select class="field" id="migrate-target"></select>
+          <button class="button" id="migrate-vault">将记忆与 Skill 合并到目标 Vault</button>
+        </div>
+        <div class="notice">迁移只复制缺少的事件和 Skill 文件，不删除源 Vault，不覆盖冲突文件，也不会改变两边的 Vault ID。</div>
+        <div class="section-label">添加 Vault</div>
+        <div>选择已经同步的 Vault，或在空目录中初始化一个新的 Vault。</div>
+        <div class="connect-form">
+          <div class="field-row"><input class="field" id="vault-path" placeholder="输入 iCloud、OneDrive 或 NAS 文件夹路径"><button class="button" id="pick">选择目录</button></div>
+          <input class="field" id="vault-name" placeholder="新 Vault 名称（可选）">
+          <label class="check"><input type="checkbox" id="create-vault"> 如果目录还不是 Vault，则初始化新 Vault</label>
+          <button class="button primary" id="connect-vault">连接 Vault</button>
+        </div>
+        <div class="notice">文件跨电脑同步仍由 iCloud、OneDrive 或 NAS 客户端完成；这里不会登录或控制网盘账号。</div>
+      </section>
+      <section class="panel agents"><div class="panel-head"><h2>Agent 接入</h2><div><button class="button small" id="sync-skills">同步全部 Skill</button></div></div><div class="panel-body"><div class="agent-grid" id="agents"></div></div></section>
+      <div class="security"><div>⚠</div><div><strong>当前版本没有端到端加密</strong>Vault 使用普通 JSON 和 Markdown 文件。不要保存密码、API Key、Token、私钥或恢复码。</div></div>
+    </div>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script nonce="__CSP_NONCE__">
+    const token = "__AGENT_VAULT_TOKEN__";
+    const app = document.querySelector('#app');
+    const toast = document.querySelector('#toast');
+    let snapshot = null;
+    const icons = { codex:'CX', claude:'CL', cursor:'CU', opencode:'OC', 'deepseek-harness':'DS', gemini:'GE', copilot:'CP', 'minimax-code':'MM' };
+    function esc(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+    function notify(message, error=false) { toast.textContent=message; toast.className=`toast show${error?' error':''}`; clearTimeout(notify.timer); notify.timer=setTimeout(()=>toast.className='toast',3200); }
+    async function api(route, options={}) { const response=await fetch(route,{...options,headers:{'content-type':'application/json','x-agent-vault-token':token,...options.headers}}); const data=await response.json(); if(!response.ok) throw new Error(data.error||'请求失败'); return data; }
+    function date(value) { if(!value) return '尚无事件'; return new Intl.DateTimeFormat('zh-CN',{dateStyle:'medium',timeStyle:'medium'}).format(new Date(value)); }
+    function renderVault(data) {
+      const content=document.querySelector('#vault-content'), badge=document.querySelector('#vault-badge');
+      if(!data.vault) {
+        badge.className='badge off'; badge.textContent=data.vaultError?'连接异常':'未连接';
+        content.innerHTML=`<div class="empty"><div class="empty-mark">☁</div><h3>${data.vaultError?'Vault 无法访问':'尚未选择 Vault'}</h3><p>${esc(data.vaultError||'从右侧选择一个同步目录，或初始化新的 Vault。')}</p></div>`; return;
+      }
+      const v=data.vault, m=v.manifest;
+      badge.className=`badge ${v.writable?'ok':'off'}`; badge.textContent=v.writable?'已连接 · 可读写':'只读或不可访问';
+      content.innerHTML=`<div class="status-line"><div class="provider-icon">☁</div><div><div class="provider-title">${esc(v.provider.label)}</div><div class="path">${esc(v.path)}</div><div class="badges"><span class="badge ok">有效 Vault</span><span class="badge ${v.writable?'ok':'off'}">${v.writable?'可读写':'不可写'}</span><span class="badge">${esc(v.provider.detail)}</span></div></div></div><div class="stats"><div class="stat"><strong>${v.memories}</strong><span>当前记忆</span></div><div class="stat"><strong>${v.events}</strong><span>同步事件</span></div><div class="stat"><strong>${v.skills}</strong><span>共享 Skill</span></div><div class="stat"><strong>v${data.version}</strong><span>工具版本</span></div></div><div class="meta"><div><b>Vault 名称：</b>${esc(m.name)}</div><div><b>Vault ID：</b>${esc(m.vaultId)}</div><div><b>最近事件：</b>${esc(date(v.latestEventAt))}</div></div><div style="margin-top:16px"><button class="button danger small" id="disconnect-vault">断开本机 Vault</button></div>`;
+      document.querySelector('#disconnect-vault').onclick=async()=>{ if(!confirm('仅取消本机默认 Vault；不会删除网盘文件，也不会移除 Agent 已有配置。继续吗？'))return; await act(()=>api('/api/vault/disconnect',{method:'POST'}),'已断开本机默认 Vault'); };
+    }
+    function renderVaults(data) {
+      const list=document.querySelector('#vault-list');
+      list.innerHTML=data.vaults.length?data.vaults.map(v=>`<div class="vault-row"><div><div class="vault-row-name">${esc(v.manifest?.name||v.provider.label)}</div><div class="path" title="${esc(v.path)}">${esc(v.path)}</div><div class="badges"><span class="badge ${v.current?'ok':''}">${v.current?'当前 Vault':esc(v.provider.label)}</span><span class="badge ${v.available&&v.writable?'ok':'off'}">${v.available?(v.writable?'可读写':'不可写'):'不可访问'}</span></div></div><div class="vault-row-actions">${v.current?'':`<button class="button primary small" data-switch-vault="${esc(v.path)}" ${v.available?'':'disabled'}>切换</button>`}<button class="button danger small" data-remove-vault="${esc(v.path)}">移出列表</button></div></div>`).join(''):'<div class="path">还没有保存的 Vault。</div>';
+      document.querySelectorAll('[data-switch-vault]').forEach(button=>button.onclick=()=>act(()=>api('/api/vault/switch',{method:'POST',body:JSON.stringify({path:button.dataset.switchVault})}),'已切换 Vault，并刷新 Agent 与 Skill'));
+      document.querySelectorAll('[data-remove-vault]').forEach(button=>button.onclick=async()=>{ if(!confirm('只从本机列表移除，不会删除 Vault 文件。继续吗？'))return; await act(()=>api('/api/vault/remove',{method:'POST',body:JSON.stringify({path:button.dataset.removeVault})}),'已从本机列表移除'); });
+      const options=data.vaults.filter(v=>v.available).map(v=>`<option value="${esc(v.path)}">${esc(v.manifest.name)} · ${esc(v.provider.label)}</option>`).join('');
+      document.querySelector('#migrate-source').innerHTML=`<option value="">选择源 Vault</option>${options}`;
+      document.querySelector('#migrate-target').innerHTML=`<option value="">选择目标 Vault</option>${options}`;
+      const auto=document.querySelector('#auto-manage'); auto.checked=data.autoManage;
+      auto.onchange=()=>act(()=>api('/api/settings/auto-manage',{method:'POST',body:JSON.stringify({enabled:auto.checked})}),auto.checked?'已开启自动管理':'已关闭自动管理');
+    }
+    function renderAgents(data) {
+      document.querySelector('#agents').innerHTML=data.agents.map(a=>{ const runnable=a.binaryPresent||a.npxAvailable; const state=a.current?['ok','已连接当前 Vault']:a.connected?['warn','已连接其他 Vault']:runnable?['','已检测，未连接']:a.configPresent?['','预配置成功']:['off','未检测到']; const availability=a.binaryPresent?'<span class="badge ok">全局命令可用</span>':a.npxAvailable?'<span class="badge ok">npx 方式可用</span>':a.configPresent?'<span class="badge">未检测到全局命令</span>':'<span class="badge">可预配置</span>'; const canConnect=!!data.vault; const stale=a.current&&!a.launchCurrent?'<span class="badge warn">启动路径需刷新</span>':''; return `<article class="agent"><div class="agent-icon">${icons[a.id]||'AG'}</div><div><div class="agent-name">${esc(a.label)}</div><div class="agent-detail" title="${esc(a.configPath)}">${esc(a.configPath)}</div><div class="badges"><span class="badge ${state[0]}">${state[1]}</span>${stale}${availability}</div></div><div class="agent-actions">${a.connected?`<button class="button danger small" data-disconnect="${a.id}">断开</button>`:''}<button class="button primary small" data-connect="${a.id}" ${canConnect?'':'disabled'}>${a.current?'刷新':'接入'}</button></div></article>`; }).join('');
+      document.querySelectorAll('[data-connect]').forEach(button=>button.onclick=()=>act(()=>api(`/api/agents/${button.dataset.connect}/connect`,{method:'POST'}),'Agent 已接入；请重启或新建 Agent 会话'));
+      document.querySelectorAll('[data-disconnect]').forEach(button=>button.onclick=async()=>{ if(!confirm('这只会移除 Agent Vault MCP 配置，不会删除 Vault 或记忆。继续吗？'))return; await act(()=>api(`/api/agents/${button.dataset.disconnect}/disconnect`,{method:'POST'}),'Agent 已断开'); });
+    }
+    async function load() { app.classList.add('loading'); try { snapshot=await api('/api/status'); renderVault(snapshot); renderVaults(snapshot); renderAgents(snapshot); } catch(error){ notify(error.message,true); } finally { app.classList.remove('loading'); } }
+    async function act(operation,message) { app.classList.add('loading'); try { await operation(); notify(message); await load(); } catch(error){ notify(error.message,true); } finally { app.classList.remove('loading'); } }
+    document.querySelector('#refresh').onclick=load;
+    document.querySelector('#pick').onclick=async()=>{ try { const result=await api('/api/pick-folder',{method:'POST'}); if(result.path) document.querySelector('#vault-path').value=result.path; } catch(error){ notify(error.message,true); } };
+    document.querySelector('#connect-vault').onclick=()=>act(()=>api('/api/vault/connect',{method:'POST',body:JSON.stringify({path:document.querySelector('#vault-path').value,name:document.querySelector('#vault-name').value,create:document.querySelector('#create-vault').checked})}),'Vault 已连接');
+    document.querySelector('#migrate-vault').onclick=async()=>{ const source=document.querySelector('#migrate-source').value,target=document.querySelector('#migrate-target').value; if(!source||!target){notify('请选择源 Vault 和目标 Vault',true);return;} if(source===target){notify('源 Vault 和目标 Vault 不能相同',true);return;} if(!confirm('将源 Vault 的记忆事件与 Skill 合并到目标 Vault；源文件不会删除。继续吗？'))return; app.classList.add('loading'); try { const response=await api('/api/vault/migrate',{method:'POST',body:JSON.stringify({source,target})}),r=response.result,conflicts=r.events.conflicts.length+r.skills.conflicts.length; notify(`迁移完成：新增 ${r.events.copied} 个记忆事件、${r.skills.copied} 个 Skill 文件；${r.events.unchanged+r.skills.unchanged} 个文件无需变更${conflicts?`；${conflicts} 个冲突未覆盖`:''}`,conflicts>0); await load(); } catch(error){notify(error.message,true);} finally {app.classList.remove('loading');} };
+    document.querySelector('#sync-skills').onclick=()=>act(()=>api('/api/skills/sync',{method:'POST'}),'共享 Skill 已同步');
+    load();
+    setInterval(()=>{ if(!document.hidden) load(); },15000);
+  </script>
+</body>
+</html>

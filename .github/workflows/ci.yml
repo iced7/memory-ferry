@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:all
+
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:exe:win
+      - name: Verify standalone executable
+        shell: pwsh
+        run: |
+          $version = & .\release\AgentVault.exe --version
+          if ($version.Trim() -ne "0.2.0") { throw "Unexpected version: $version" }
+          $env:AGENT_VAULT_HOME = Join-Path $env:RUNNER_TEMP "agent-vault-state"
+          $vault = Join-Path $env:RUNNER_TEMP "AgentVault"
+          & .\release\AgentVault.exe init $vault --name "Windows EXE Test" --json
+          & .\release\AgentVault.exe remember "Windows standalone executable works" --kind lesson --json
+          $result = & .\release\AgentVault.exe recall "standalone executable" --json
+          if ($result -notmatch "Windows standalone executable works") { throw "Recall failed" }
+          $process = Start-Process .\release\AgentVault.exe -ArgumentList @("ui", "--no-open", "--port", "47839") -PassThru
+          try {
+            $ready = $false
+            1..30 | ForEach-Object {
+              if (-not $ready) {
+                try { $ready = (Invoke-RestMethod "http://127.0.0.1:47839/api/health").ok } catch { Start-Sleep -Milliseconds 250 }
+              }
+            }
+            if (-not $ready) { throw "Dashboard health check failed" }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgentVault-windows-x64
+          path: release/
