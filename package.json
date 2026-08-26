@@ -1,6 +1,6 @@
 {
   "name": "agent-vault-sync",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Local-first, folder-synced long-term memory and reusable skills for AI agents.",
   "type": "module",
   "bin": {

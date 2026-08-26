@@ -127,7 +127,7 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   }
   const context = adapterContext(vaultPath || process.cwd(), options.cliPath, { homeDir: options.homeDir, env: options.env, platform: options.platform });
   const agents = await detectAgents(context);
-  return { version: "0.4.0", vault, vaults, vaultPath: vaultPath || null, vaultError, agents, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform };
+  return { version: '0.5.0', vault, vaults, vaultPath: vaultPath || null, vaultError, agents, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform }
 }
 
 async function connectedAgentIds(vaultPath: string, options: Required<Pick<UiOptions, "cliPath" | "homeDir" | "env" | "platform">>): Promise<AgentId[]> {

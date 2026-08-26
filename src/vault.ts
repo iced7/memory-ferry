@@ -9,13 +9,16 @@ import { ensureBuiltinSkill } from "./skills.js";
 import { isoDate, pathExists, readJson, safeSegment, stableId, uniqueStrings, writeJsonAtomic } from "./utils.js";
 import {
   cosineSimilarity,
+  emptyEmbeddingIndex,
   embeddingIndexPath,
   embeddingModel,
   loadEmbeddingIndex,
   memoryEmbeddingText,
   ollamaEmbedder,
+  planEmbeddingRefresh,
   removeEmbedding,
   semanticWeight,
+  sweepEmbeddingRefresh,
   upsertEmbedding,
   type Embedder,
 } from './embed.js'
@@ -32,6 +35,16 @@ function cleanSource(source?: MemoryRecord["source"]): MemoryRecord["source"] | 
   if (!source) return undefined;
   const cleaned = Object.fromEntries(Object.entries(source).filter(([, value]) => typeof value === "string" && value.trim())) as NonNullable<MemoryRecord["source"]>;
   return Object.keys(cleaned).length ? cleaned : undefined;
+}
+
+function filterMemories(values: MemoryRecord[], filter: ListFilter = {}): MemoryRecord[] {
+  let filtered = values
+  if (filter.kind) filtered = filtered.filter((memory) => memory.kind === filter.kind)
+  if (filter.scope) filtered = filtered.filter((memory) => memory.scope.type === filter.scope)
+  if (filter.scopeId) filtered = filtered.filter((memory) => memory.scope.id === filter.scopeId)
+  if (filter.tags?.length) filtered = filtered.filter((memory) => filter.tags!.every((tag) => memory.tags.includes(tag)))
+  filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+  return filtered.slice(0, filter.limit || 100)
 }
 
 function validateEvent(value: MemoryEvent, file: string): MemoryEvent {
@@ -271,13 +284,7 @@ export class Vault {
   }
 
   async list(filter: ListFilter = {}): Promise<MemoryRecord[]> {
-    let values = [...(await this.current()).values()];
-    if (filter.kind) values = values.filter((memory) => memory.kind === filter.kind);
-    if (filter.scope) values = values.filter((memory) => memory.scope.type === filter.scope);
-    if (filter.scopeId) values = values.filter((memory) => memory.scope.id === filter.scopeId);
-    if (filter.tags?.length) values = values.filter((memory) => filter.tags!.every((tag) => memory.tags.includes(tag)));
-    values.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
-    return values.slice(0, filter.limit || 100);
+    return filterMemories([...(await this.current()).values()], filter)
   }
 
   private queueEmbedding(record: MemoryRecord): void {
@@ -301,14 +308,30 @@ export class Vault {
   }
 
   async search(query: string, limit = 10, options: SearchOptions = {}) {
-    const memories = await this.list({ ...options, limit: Number.MAX_SAFE_INTEGER })
+    const allMemories = filterMemories([...(await this.current()).values()], { limit: Number.MAX_SAFE_INTEGER })
+    const memories = filterMemories(allMemories, { ...options, limit: Number.MAX_SAFE_INTEGER })
     const textResults = searchMemories(memories, query, Number.MAX_SAFE_INTEGER)
     if (options.semantic === false || !query.trim()) return textResults.slice(0, limit)
 
     const { embedder, env } = this.embedding
     const model = embeddingModel(env)
     const index = await loadEmbeddingIndex(this.embeddingsPath, model)
-    if (index.model !== model || !Object.keys(index.vectors).length) {
+    const refreshIndex = index.model === model ? index : emptyEmbeddingIndex(model)
+    const plan = planEmbeddingRefresh(allMemories, refreshIndex)
+    if (index.model !== model) {
+      plan.orphan = planEmbeddingRefresh(allMemories, index).orphan
+    }
+    for (const memoryId of [...plan.orphan, ...plan.stale]) delete refreshIndex.vectors[memoryId]
+    void sweepEmbeddingRefresh({
+      file: this.embeddingsPath,
+      model,
+      memories: allMemories,
+      plan,
+      embedder,
+      env,
+    }).catch(() => undefined)
+
+    if (!Object.keys(refreshIndex.vectors).length) {
       return textResults.slice(0, limit)
     }
 
@@ -320,7 +343,7 @@ export class Vault {
       return memories
         .map((memory) => {
           const textScore = textScores.get(memory.id) || 0
-          const vector = index.vectors[memory.id]?.v
+          const vector = refreshIndex.vectors[memory.id]?.v
           const cosine = vector ? cosineSimilarity(queryVector, vector) : 0
           return { memory, score: textScore + weight * cosine, textScore, cosine }
         })

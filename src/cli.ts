@@ -11,7 +11,7 @@ import { runMcp } from "./mcp.js";
 import { runUi } from "./ui.js";
 import { migrateVault } from "./migration.js";
 
-const VERSION = "0.4.0";
+const VERSION = '0.5.0'
 const HELP = `Agent Vault Sync ${VERSION}
 
 Local-first long-term memory shared through iCloud, OneDrive, NAS, or any synced folder.

@@ -14,6 +14,23 @@ export interface EmbeddingIndex {
   vectors: Record<string, { v: number[]; updatedAt: string }>
 }
 
+export interface EmbeddingRefreshPlan {
+  valid: string[]
+  stale: string[]
+  missing: string[]
+  orphan: string[]
+}
+
+export interface EmbeddingSweepOptions {
+  file: string
+  model: string
+  memories: MemoryRecord[]
+  plan: EmbeddingRefreshPlan
+  embedder: Embedder
+  env: NodeJS.ProcessEnv
+  limit?: number
+}
+
 const DEFAULT_MODEL = 'nomic-embed-text'
 const DEFAULT_HOST = 'http://127.0.0.1:11434'
 const indexMutations = new Map<string, Promise<void>>()
@@ -156,6 +173,58 @@ export async function removeEmbedding(file: string, model: string, memoryId: str
   await mutateEmbeddingIndex(file, model, (index) => {
     delete index.vectors[memoryId]
   })
+}
+
+export function planEmbeddingRefresh(memories: MemoryRecord[], index: EmbeddingIndex): EmbeddingRefreshPlan {
+  const records = new Map(memories.map((memory) => [memory.id, memory]))
+  const valid: string[] = []
+  const stale: string[] = []
+  const orphan: string[] = []
+
+  for (const [memoryId, entry] of Object.entries(index.vectors)) {
+    const memory = records.get(memoryId)
+    if (!memory) orphan.push(memoryId)
+    else if (entry.updatedAt !== memory.updatedAt) stale.push(memoryId)
+    else valid.push(memoryId)
+  }
+
+  const missing = memories
+    .filter((memory) => !index.vectors[memory.id])
+    .map((memory) => memory.id)
+  return { valid, stale, missing, orphan }
+}
+
+export async function sweepEmbeddingRefresh(options: EmbeddingSweepOptions): Promise<void> {
+  const { file, model, memories, plan, embedder, env, limit = 25 } = options
+  for (const memoryId of plan.orphan) {
+    try {
+      await removeEmbedding(file, model, memoryId)
+    } catch {
+      // The local index is disposable; retry cleanup on a later search.
+    }
+  }
+
+  const records = new Map(memories.map((memory) => [memory.id, memory]))
+  const pending = [...plan.stale, ...plan.missing]
+    .slice(0, Math.max(0, limit))
+    .map((memoryId) => records.get(memoryId))
+    .filter((memory): memory is MemoryRecord => Boolean(memory))
+  if (!pending.length || env.AGENT_VAULT_EMBED === 'off') return
+
+  try {
+    if (!(await embedder.available(env))) return
+  } catch {
+    return
+  }
+
+  for (const memory of pending) {
+    try {
+      const vector = await embedder.embed(memoryEmbeddingText(memory), model, env)
+      await upsertEmbedding(file, model, memory.id, vector, memory.updatedAt)
+    } catch {
+      // A failed record must not prevent other missing vectors from healing.
+    }
+  }
 }
 
 export function memoryEmbeddingText(memory: MemoryRecord): string {

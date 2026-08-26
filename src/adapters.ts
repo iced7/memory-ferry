@@ -314,7 +314,7 @@ const adapters: Adapter[] = [
       const manifest = await updateJsonFile(path.join(root, "plugin.json"), (value) => {
         value.$schema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
         value.name = "agent-vault";
-        value.version = "0.4.0";
+        value.version = '0.5.0'
         value.description = "Shared local-first long-term memory and reusable Skills for MiniMax Code.";
         value.author = { name: "Agent Vault Sync" };
         value.license = "MIT";

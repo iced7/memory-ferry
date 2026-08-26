@@ -2,7 +2,7 @@
 
 一个低成本、local-first 的跨 Agent 长期记忆与 Skill 复用工具。把 Vault 放在 iCloud Drive、OneDrive、Dropbox、Syncthing 或 NAS 同步目录中，Codex、Claude Code、Cursor、OpenCode、DeepSeek Harness、Gemini CLI、GitHub Copilot CLI 和 MiniMax Code 就能读写同一份记忆。
 
-当前版本：`0.4.0`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
+当前版本：`0.5.0`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
 
 第一次使用建议先阅读：[《Agent Vault Sync 用户说明与使用手册》](docs/用户使用手册.md)。手册包含完整安装、跨电脑部署、各 Agent 接入、Skill 复用、命令参考、数据安全和故障排查。
 
@@ -79,6 +79,8 @@ agent-vault status
 agent-vault agents detect
 agent-vault list --limit 20
 agent-vault context "当前项目的技术约束"
+agent-vault recall "仅用文本检索" --no-semantic
+agent-vault context "仅用文本生成上下文" --no-semantic
 agent-vault update <id> --content "新的内容"
 agent-vault forget <id>
 agent-vault skills list
@@ -119,12 +121,12 @@ agent-vault ui --port 47831 --no-open
 适配器会把下面的 stdio MCP Server 写入 Agent 配置：
 
 - `memory_remember`
-- `memory_recall`
+- `memory_recall`（可选 `semantic`）
 - `memory_list`
 - `memory_get`
 - `memory_update`
 - `memory_forget`
-- `memory_context`
+- `memory_context`（可选 `semantic`）
 - `vault_status`
 - `skill_list`
 
@@ -150,6 +152,19 @@ agent-vault mcp --vault "/path/to/AgentVault"
 DeepSeek Harness 的 MCP 适配使用官方 `@deepseek-ai/dsh-mcp-client` Cordis 插件；由于 DSH 仍在快速演进，若插件不可用，内置 Skill 会回退调用 `agent-vault` CLI。
 
 MiniMax Code 适配使用官方公开的 Agent Plugins 1.0 本地 marketplace。接入时生成同时包含 MCP 与共享 Skill 的 `agent-vault` Plugin；不再依赖旧版 `~/.mavis` 配置。
+
+## 语义检索（可选）
+
+`recall` 和 `context` 可通过本机 Ollama 进行语义召回，并与现有 Unicode/CJK 文本分数混合。Ollama 地址由 `OLLAMA_HOST` 指定，默认为 `http://127.0.0.1:11434`；Embedding 模型由 `AGENT_VAULT_EMBED_MODEL` 指定，默认为 `nomic-embed-text`；混合权重由 `AGENT_VAULT_SEMANTIC_WEIGHT` 指定，默认为 `1.5`。
+
+设置 `AGENT_VAULT_EMBED=off` 可关闭 Embedding，也可在单次命令上使用 `--no-semantic`：
+
+```bash
+agent-vault recall "部署方案" --no-semantic
+agent-vault context "当前项目约束" --no-semantic
+```
+
+Embedding 索引位于不同步的本机状态目录，不会写入 append-only Vault。检索会自动刷新本机写入、网盘同步和手动迁移等任何数据来源带来的索引变化。Ollama 不可用时会自动回退到 Unicode/CJK 文本检索。
 
 ## Skill 复用
 
@@ -183,11 +198,11 @@ AgentVault/
 └── skills/<skill-name>/...
 ```
 
-本机设备 ID、逻辑时钟和将来的检索缓存都放在同步目录之外。程序使用“临时文件 + 原子改名”提交事件，并忽略未完成文件。详见 [架构说明](docs/architecture.md)。
+本机设备 ID、逻辑时钟、事件缓存和 Embedding 索引都放在同步目录之外。程序使用“临时文件 + 原子改名”提交事件，并忽略未完成文件。详见 [架构说明](docs/architecture.md)。
 
 ## 安全边界
 
-- 0.4.0 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
+- 0.5.0 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
 - MCP/CLI 不会主动读取其他聊天记录；只处理明确写入 Vault 的内容。
 - 召回内容是上下文，不是高优先级指令；当前用户指令始终优先。
 - 建议对网盘开启多因素认证，并避免把 Vault 放进公开共享目录。

@@ -21,7 +21,7 @@ function failure(error: unknown) {
 }
 
 export function createMcpServer(vault: Vault): McpServer {
-  const server = new McpServer({ name: "agent-vault-sync", version: "0.4.0" });
+  const server = new McpServer({ name: 'agent-vault-sync', version: '0.5.0' })
 
   server.registerTool("memory_remember", {
     description: "Save a durable fact, preference, decision, lesson, note, or task to shared long-term memory.",

@@ -6,16 +6,31 @@ import test from 'node:test'
 import {
   embeddingIndexPath,
   loadEmbeddingIndex,
+  planEmbeddingRefresh,
   type Embedder,
+  type EmbeddingIndex,
   writeEmbeddingIndex,
 } from '../src/embed.js'
 import { searchMemories } from '../src/search.js'
 import { StateStore } from '../src/state.js'
+import type { MemoryRecord } from '../src/types.js'
 import { stableId } from '../src/utils.js'
 import { Vault } from '../src/vault.js'
 import { unavailableEmbedding } from './helpers.js'
 
 const MODEL = 'test-embed-model'
+
+function memory(id: string, updatedAt: string): MemoryRecord {
+  return {
+    id,
+    content: `memory ${id}`,
+    kind: 'note',
+    scope: { type: 'global' },
+    tags: [],
+    createdAt: updatedAt,
+    updatedAt,
+  }
+}
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-vault-search-test-'))
@@ -213,4 +228,154 @@ test('empty queries keep the existing recent-memory behavior without embedding',
   }).search('')
   assert.equal(results.length, 1)
   assert.equal(called, false)
+})
+
+test('plans valid, stale, missing, and orphan embedding entries', () => {
+  const memories = [
+    memory('valid', '2026-01-01T00:00:00.000Z'),
+    memory('stale', '2026-01-02T00:00:00.000Z'),
+    memory('missing', '2026-01-03T00:00:00.000Z'),
+  ]
+  const index: EmbeddingIndex = {
+    model: MODEL,
+    vectors: {
+      valid: { v: [1, 0], updatedAt: memories[0].updatedAt },
+      stale: { v: [1, 0], updatedAt: '2026-01-01T00:00:00.000Z' },
+      orphan: { v: [1, 0], updatedAt: '2026-01-01T00:00:00.000Z' },
+    },
+  }
+
+  assert.deepEqual(planEmbeddingRefresh(memories, index), {
+    valid: ['valid'],
+    stale: ['stale'],
+    missing: ['missing'],
+    orphan: ['orphan'],
+  })
+})
+
+test('search backfills a memory that arrives from another device', async () => {
+  const { root, state, vault } = await fixture()
+  const remoteVault = await Vault.init(vault.root, 'Remote Device', new StateStore(path.join(root, 'remote-state')), unavailableEmbedding)
+  const remote = await remoteVault.remember({ content: 'conceptual neighbor from sync' })
+  const embedder: Embedder = {
+    available: async () => true,
+    embed: async () => [1, 0],
+  }
+  const searchVault = new Vault(vault.root, state, {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder,
+  })
+
+  assert.deepEqual(await searchVault.search('alpha'), [])
+  await waitFor(async () => Boolean((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[remote.id]))
+  const results = await searchVault.search('alpha')
+
+  assert.equal(results[0].memory.id, remote.id)
+})
+
+test('search excludes a remotely-stale vector and re-embeds the update', async () => {
+  const { root, state, vault } = await fixture()
+  const remoteVault = await Vault.init(vault.root, 'Remote Device', new StateStore(path.join(root, 'remote-state')), unavailableEmbedding)
+  const original = await remoteVault.remember({ content: 'old remote content' })
+  await writeEmbeddingIndex(vault.embeddingsPath, {
+    model: MODEL,
+    vectors: { [original.id]: { v: [1, 0], updatedAt: original.updatedAt } },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 2))
+  const updated = await remoteVault.update(original.id, { content: 'new remote content' })
+  const searchVault = new Vault(vault.root, state, {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder: {
+      available: async () => true,
+      embed: async (text) => text === 'alpha' ? [1, 0] : [0, 1],
+    },
+  })
+
+  const results = await searchVault.search('alpha')
+  assert.equal(results.some((result) => result.memory.id === updated.id), false)
+  await waitFor(async () => (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[updated.id]?.updatedAt === updated.updatedAt)
+  assert.deepEqual((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[updated.id], {
+    v: [0, 1],
+    updatedAt: updated.updatedAt,
+  })
+})
+
+test('search drops an embedding after a remote tombstone', async () => {
+  const { root, state, vault } = await fixture()
+  const remoteVault = await Vault.init(vault.root, 'Remote Device', new StateStore(path.join(root, 'remote-state')), unavailableEmbedding)
+  const deleted = await remoteVault.remember({ content: 'deleted remote concept' })
+  const survivor = await remoteVault.remember({ content: 'alpha survivor' })
+  await writeEmbeddingIndex(vault.embeddingsPath, {
+    model: MODEL,
+    vectors: { [deleted.id]: { v: [1, 0], updatedAt: deleted.updatedAt } },
+  })
+  assert.equal(await remoteVault.forget(deleted.id), true)
+  const searchVault = new Vault(vault.root, state, {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder: {
+      available: async () => false,
+      embed: async () => {
+        throw new Error('embedding must not run when unavailable')
+      },
+    },
+  })
+
+  const results = await searchVault.search('alpha')
+  assert.equal(results[0].memory.id, survivor.id)
+  assert.equal(results.some((result) => result.memory.id === deleted.id), false)
+  await waitFor(async () => !(deleted.id in (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors))
+})
+
+test('filtered search keeps embeddings for current memories outside the filter', async () => {
+  const { state, vault } = await fixture()
+  const note = await vault.remember({ content: 'alpha note', kind: 'note' })
+  const preference = await vault.remember({ content: 'other preference', kind: 'preference' })
+  await writeEmbeddingIndex(vault.embeddingsPath, {
+    model: MODEL,
+    vectors: {
+      [note.id]: { v: [1, 0], updatedAt: note.updatedAt },
+      [preference.id]: { v: [0, 1], updatedAt: preference.updatedAt },
+    },
+  })
+  const searchVault = new Vault(vault.root, state, {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder: {
+      available: async () => false,
+      embed: async () => {
+        throw new Error('embedding must not run when unavailable')
+      },
+    },
+  })
+
+  const results = await searchVault.search('alpha', 10, { kind: 'note' })
+  assert.deepEqual(results.map((result) => result.memory.id), [note.id])
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.ok((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[preference.id])
+})
+
+test('search backfills at most 25 missing embeddings per sweep', async () => {
+  const { root, state, vault } = await fixture()
+  const remoteVault = await Vault.init(vault.root, 'Remote Device', new StateStore(path.join(root, 'remote-state')), unavailableEmbedding)
+  for (let index = 0; index < 100; index += 1) {
+    await remoteVault.remember({ content: `remote missing ${index.toString().padStart(3, '0')}` })
+  }
+  let recordEmbeddings = 0
+  const searchVault = new Vault(vault.root, state, {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder: {
+      available: async () => true,
+      embed: async (text) => {
+        if (text !== 'query') recordEmbeddings += 1
+        return [1, 0]
+      },
+    },
+  })
+
+  await searchVault.search('query')
+  await waitFor(async () => Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length === 25)
+  assert.equal(recordEmbeddings, 25)
+
+  await searchVault.search('query')
+  await waitFor(async () => Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length === 50)
+  assert.equal(recordEmbeddings, 50)
 })
