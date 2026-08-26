@@ -7,11 +7,12 @@ import { StateStore } from '../src/state.js'
 import type { MemoryRecord } from '../src/types.js'
 import { pathExists, stableId } from '../src/utils.js'
 import { Vault } from '../src/vault.js'
+import { unavailableEmbedding } from './helpers.js'
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-vault-cache-test-'))
   const state = new StateStore(path.join(root, 'local-state'))
-  const vault = await Vault.init(path.join(root, 'synced'), 'Cache Test', state)
+  const vault = await Vault.init(path.join(root, 'synced'), 'Cache Test', state, unavailableEmbedding)
   return { root, state, vault }
 }
 

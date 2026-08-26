@@ -24,12 +24,12 @@ Usage:
   agent-vault vault migrate <source-folder> <target-folder>
   agent-vault status [--json]
   agent-vault remember <text> [--title <title>] [--kind <kind>] [--scope <scope>] [--scope-id <id>] [--tag <tag> ...]
-  agent-vault recall <query> [--limit <n>] [--json]
+  agent-vault recall <query> [--limit <n>] [--no-semantic] [--json]
   agent-vault list [--limit <n>] [--json]
   agent-vault get <memory-id> [--json]
   agent-vault update <memory-id> [--content <text>] [--title <title>] [--tag <tag> ...]
   agent-vault forget <memory-id>
-  agent-vault context <query> [--limit <n>]
+  agent-vault context <query> [--limit <n>] [--no-semantic]
   agent-vault skills list
   agent-vault skills sync [all|codex|claude|cursor|opencode|deepseek-harness|gemini|copilot|minimax-code]
   agent-vault agents detect [--json]
@@ -49,7 +49,7 @@ interface Parsed { positionals: string[]; flags: Map<string, string[]>; }
 function parse(argv: string[]): Parsed {
   const positionals: string[] = [];
   const flags = new Map<string, string[]>();
-  const booleans = new Set(["json", "help", "h", "version", "no-open"]);
+  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic"]);
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index];
     if (!token.startsWith("--") && token !== "-h") { positionals.push(token); continue; }
@@ -141,7 +141,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === "recall") {
     const query = [subcommand, ...rest].filter(Boolean).join(" ");
-    const results = await vault.search(requireArg(query, "search query"), numberFlag(parsed, "limit", 10), { kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag") });
+    const results = await vault.search(requireArg(query, "search query"), numberFlag(parsed, "limit", 10), { kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag"), semantic: !parsed.flags.has("no-semantic") });
     if (wantsJson) print(results, true); else print(results.length ? results.map(({ memory, score }) => `${score.toFixed(2)}  ${memory.id}  [${memory.kind}] ${memory.title ? `${memory.title}: ` : ""}${memory.content}`).join("\n") : "No matching memory.");
     return;
   }
@@ -156,7 +156,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     print(memory, wantsJson); return;
   }
   if (command === "forget") { print({ id: requireArg(subcommand, "memory ID"), forgotten: await vault.forget(subcommand!) }, wantsJson); return; }
-  if (command === "context") { print(await vault.context(requireArg([subcommand, ...rest].filter(Boolean).join(" "), "context query"), numberFlag(parsed, "limit", 8))); return; }
+  if (command === "context") { print(await vault.context(requireArg([subcommand, ...rest].filter(Boolean).join(" "), "context query"), numberFlag(parsed, "limit", 8), { semantic: !parsed.flags.has("no-semantic") })); return; }
 
   const cliPath = fileURLToPath(import.meta.url);
   const context = adapterContext(vault.root, cliPath);

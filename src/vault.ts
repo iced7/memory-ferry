@@ -1,12 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, VaultManifest } from "./types.js";
+import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, SearchOptions, VaultManifest } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { StateStore } from "./state.js";
 import { searchMemories } from "./search.js";
 import { ensureBuiltinSkill } from "./skills.js";
 import { isoDate, pathExists, readJson, safeSegment, stableId, uniqueStrings, writeJsonAtomic } from "./utils.js";
+import {
+  cosineSimilarity,
+  embeddingIndexPath,
+  embeddingModel,
+  loadEmbeddingIndex,
+  memoryEmbeddingText,
+  ollamaEmbedder,
+  removeEmbedding,
+  semanticWeight,
+  upsertEmbedding,
+  type Embedder,
+} from './embed.js'
 
 const KINDS: MemoryKind[] = ["fact", "preference", "decision", "lesson", "note", "task"];
 const SCOPES = ["global", "project", "agent"] as const;
@@ -38,6 +50,11 @@ interface EventTree {
 interface EventCache {
   fingerprint: string;
   events: MemoryEvent[];
+}
+
+export interface VaultEmbeddingOptions {
+  env?: NodeJS.ProcessEnv
+  embedder?: Embedder
 }
 
 function pathIsWithin(root: string, candidate: string): boolean {
@@ -107,18 +124,25 @@ async function recentEventClocks(root: string, node: string): Promise<HybridLogi
 export class Vault {
   readonly root: string;
   readonly state: StateStore;
+  readonly embedding: Required<VaultEmbeddingOptions>
+  private readonly embeddingVersions = new Map<string, number>()
 
-  constructor(root: string, state = new StateStore()) {
+  constructor(root: string, state = new StateStore(), embedding: VaultEmbeddingOptions = {}) {
     this.root = path.resolve(root);
     this.state = state;
+    this.embedding = {
+      env: embedding.env || process.env,
+      embedder: embedding.embedder || ollamaEmbedder,
+    }
   }
 
   get manifestPath(): string { return path.join(this.root, "agent-vault.json"); }
   get eventsPath(): string { return path.join(this.root, "memory", "events"); }
   get eventsCachePath(): string { return path.join(this.state.home, 'cache', `${stableId(this.root)}-events.json`); }
+  get embeddingsPath(): string { return embeddingIndexPath(this.state.home, this.root) }
 
-  static async init(root: string, name = "Agent Vault", state = new StateStore()): Promise<Vault> {
-    const vault = new Vault(root, state);
+  static async init(root: string, name = "Agent Vault", state = new StateStore(), embedding: VaultEmbeddingOptions = {}): Promise<Vault> {
+    const vault = new Vault(root, state, embedding);
     await mkdir(vault.eventsPath, { recursive: true });
     await mkdir(path.join(vault.root, "skills"), { recursive: true });
     if (!(await pathExists(vault.manifestPath))) {
@@ -211,6 +235,7 @@ export class Vault {
       tags: uniqueStrings(input.tags || []), ...(cleanSource(input.source) ? { source: cleanSource(input.source) } : {}), createdAt: now, updatedAt: now
     };
     await this.append("put", record.id, record);
+    this.queueEmbedding(record)
     return record;
   }
 
@@ -234,12 +259,14 @@ export class Vault {
     };
     if (!record.content) throw new Error("Memory content cannot be empty.");
     await this.append("put", id, record);
+    this.queueEmbedding(record)
     return record;
   }
 
   async forget(id: string): Promise<boolean> {
     if (!(await this.get(id))) return false;
     await this.append("delete", id);
+    this.queueEmbeddingRemoval(id)
     return true;
   }
 
@@ -253,12 +280,61 @@ export class Vault {
     return values.slice(0, filter.limit || 100);
   }
 
-  async search(query: string, limit = 10, filter: ListFilter = {}) {
-    return searchMemories(await this.list({ ...filter, limit: Number.MAX_SAFE_INTEGER }), query, limit);
+  private queueEmbedding(record: MemoryRecord): void {
+    const { embedder, env } = this.embedding
+    if (env.AGENT_VAULT_EMBED === 'off') return
+    const model = embeddingModel(env)
+    const version = (this.embeddingVersions.get(record.id) || 0) + 1
+    this.embeddingVersions.set(record.id, version)
+    void (async () => {
+      if (!(await embedder.available(env))) return
+      const vector = await embedder.embed(memoryEmbeddingText(record), model, env)
+      if (this.embeddingVersions.get(record.id) !== version) return
+      await upsertEmbedding(this.embeddingsPath, model, record.id, vector, record.updatedAt)
+    })().catch(() => undefined)
   }
 
-  async context(query: string, limit = 8): Promise<string> {
-    const results = await this.search(query, limit);
+  private queueEmbeddingRemoval(memoryId: string): void {
+    this.embeddingVersions.set(memoryId, (this.embeddingVersions.get(memoryId) || 0) + 1)
+    const model = embeddingModel(this.embedding.env)
+    void removeEmbedding(this.embeddingsPath, model, memoryId).catch(() => undefined)
+  }
+
+  async search(query: string, limit = 10, options: SearchOptions = {}) {
+    const memories = await this.list({ ...options, limit: Number.MAX_SAFE_INTEGER })
+    const textResults = searchMemories(memories, query, Number.MAX_SAFE_INTEGER)
+    if (options.semantic === false || !query.trim()) return textResults.slice(0, limit)
+
+    const { embedder, env } = this.embedding
+    const model = embeddingModel(env)
+    const index = await loadEmbeddingIndex(this.embeddingsPath, model)
+    if (index.model !== model || !Object.keys(index.vectors).length) {
+      return textResults.slice(0, limit)
+    }
+
+    try {
+      if (!(await embedder.available(env))) return textResults.slice(0, limit)
+      const queryVector = await embedder.embed(query, model, env)
+      const textScores = new Map(textResults.map((result) => [result.memory.id, result.score]))
+      const weight = semanticWeight(env)
+      return memories
+        .map((memory) => {
+          const textScore = textScores.get(memory.id) || 0
+          const vector = index.vectors[memory.id]?.v
+          const cosine = vector ? cosineSimilarity(queryVector, vector) : 0
+          return { memory, score: textScore + weight * cosine, textScore, cosine }
+        })
+        .filter((result) => result.textScore > 0 || result.cosine > 0)
+        .sort((a, b) => b.score - a.score || b.memory.updatedAt.localeCompare(a.memory.updatedAt) || a.memory.id.localeCompare(b.memory.id))
+        .slice(0, limit)
+        .map(({ memory, score }) => ({ memory, score }))
+    } catch {
+      return textResults.slice(0, limit)
+    }
+  }
+
+  async context(query: string, limit = 8, options: Pick<SearchOptions, 'semantic'> = {}): Promise<string> {
+    const results = await this.search(query, limit, options);
     if (!results.length) return "No relevant shared memory found.";
     return results.map(({ memory }) => `- [${memory.kind}/${memory.scope.type}${memory.scope.id ? `:${memory.scope.id}` : ""}] ${memory.title ? `${memory.title}: ` : ""}${memory.content} (id: ${memory.id})`).join("\n");
   }

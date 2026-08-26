@@ -39,9 +39,9 @@ export function createMcpServer(vault: Vault): McpServer {
   server.registerTool("memory_recall", {
     description: "Search shared long-term memory for information relevant to a task or question.",
     annotations: readOnly,
-    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(50).optional(), kind: kind.optional(), scope: scope.optional(), scopeId: z.string().optional(), tags: z.array(z.string()).optional() }
+    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(50).optional(), kind: kind.optional(), scope: scope.optional(), scopeId: z.string().optional(), tags: z.array(z.string()).optional(), semantic: z.boolean().optional() }
   }, async (input) => {
-    try { return response(await vault.search(input.query, input.limit || 10, { kind: input.kind as MemoryKind | undefined, scope: input.scope as ScopeType | undefined, scopeId: input.scopeId, tags: input.tags })); }
+    try { return response(await vault.search(input.query, input.limit || 10, { kind: input.kind as MemoryKind | undefined, scope: input.scope as ScopeType | undefined, scopeId: input.scopeId, tags: input.tags, semantic: input.semantic })); }
     catch (error) { return failure(error); }
   });
 
@@ -80,9 +80,9 @@ export function createMcpServer(vault: Vault): McpServer {
   server.registerTool("memory_context", {
     description: "Return a compact text block of relevant shared memory suitable for an agent context.",
     annotations: readOnly,
-    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(30).optional() }
-  }, async ({ query, limit }) => {
-    try { return response(await vault.context(query, limit || 8)); }
+    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(30).optional(), semantic: z.boolean().optional() }
+  }, async ({ query, limit, semantic }) => {
+    try { return response(await vault.context(query, limit || 8, { semantic })); }
     catch (error) { return failure(error); }
   });
 

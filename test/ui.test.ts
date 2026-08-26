@@ -7,6 +7,7 @@ import { StateStore } from "../src/state.js";
 import { startUiServer } from "../src/ui.js";
 import { Vault } from "../src/vault.js";
 import { testEnv } from "./helpers.js";
+import { unavailableEmbedding } from './helpers.js'
 
 test("serves a token-protected dashboard and manages vault/agent connections", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-ui-"));
@@ -55,7 +56,7 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   assert.match(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), /agent-vault/);
   assert.match(await readFile(path.join(homeDir, ".agents", "skills", "agent-vault-memory", "SKILL.md"), "utf8"), /memory_recall/);
 
-  await new Vault(vaultPath, state).remember({ content: "migrate this memory" });
+  await new Vault(vaultPath, state, unavailableEmbedding).remember({ content: "migrate this memory" });
   const secondVault = path.join(root, "synced", "SecondVault");
   assert.equal((await api("/api/vault/connect", { method: "POST", body: JSON.stringify({ path: secondVault, create: true, name: "Second Vault" }) })).response.status, 200);
   const multiStatus = (await api("/api/status")).value;

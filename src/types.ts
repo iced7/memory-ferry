@@ -70,3 +70,7 @@ export interface ListFilter {
   tags?: string[];
   limit?: number;
 }
+
+export interface SearchOptions extends ListFilter {
+  semantic?: boolean
+}

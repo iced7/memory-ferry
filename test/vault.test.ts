@@ -5,11 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { StateStore } from "../src/state.js";
 import { Vault } from "../src/vault.js";
+import { unavailableEmbedding } from './helpers.js'
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-test-"));
   const state = new StateStore(path.join(root, "local-state"));
-  const vault = await Vault.init(path.join(root, "synced"), "Test", state);
+  const vault = await Vault.init(path.join(root, "synced"), "Test", state, unavailableEmbedding);
   return { root, state, vault };
 }
 
