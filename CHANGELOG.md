@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - Unreleased
+
+- Fixed memory scope updates so changing a scope type preserves its ID and changing an ID preserves its type.
+- Made the test environment hermetic so real user Agent configuration cannot be detected or rewritten.
+- Added ownership markers to synced Skills and pruning for stale Agent Vault-managed copies while preserving user-owned directories.
+
 ## 0.4.0 - 2026-08-26
 
 - Added a persistent multi-Vault registry with graphical switch and remove controls.

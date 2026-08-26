@@ -1,19 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { StateStore } from "../src/state.js";
 import { startUiServer } from "../src/ui.js";
 import { Vault } from "../src/vault.js";
+import { testEnv } from "./helpers.js";
 
 test("serves a token-protected dashboard and manages vault/agent connections", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-ui-"));
   const homeDir = path.join(root, "home");
+  const sentinelDir = path.join(root, "sentinel-dsh");
+  const sentinelConfig = path.join(sentinelDir, "cordis.patch.yml");
+  const sentinelContent = "# >>> agent-vault:deepseek-harness-mcp >>>\n- sentinel: true\n# <<< agent-vault:deepseek-harness-mcp <<<\n";
+  await mkdir(sentinelDir, { recursive: true });
+  await writeFile(sentinelConfig, sentinelContent, "utf8");
   const state = new StateStore(path.join(root, "state"));
   const handle = await startUiServer({
     state, cliPath: path.join(root, "dist", "cli.js"), homeDir,
-    env: { ...process.env, PATH: "" }, platform: "darwin", host: "127.0.0.1", port: 0, open: false
+    env: testEnv({ PATH: "", DSH_HOME: sentinelDir }), platform: "darwin", host: "127.0.0.1", port: 0, open: false
   });
   t.after(() => handle.close());
 
@@ -34,6 +40,7 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   const vaultPath = path.join(root, "synced", "AgentVault");
   const connected = await api("/api/vault/connect", { method: "POST", body: JSON.stringify({ path: vaultPath, create: true, name: "UI Test Vault" }) });
   assert.equal(connected.response.status, 200);
+  assert.equal(await readFile(sentinelConfig, "utf8"), sentinelContent);
   const status = (await api("/api/status")).value;
   assert.equal(status.vault.manifest.name, "UI Test Vault");
   assert.equal(status.vault.provider.id, "local");

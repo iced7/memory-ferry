@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { adapterContext, detectAgents, installAgents, uninstallAgents, type AdapterContext } from "../src/adapters.js";
+import { testEnv } from "./helpers.js";
 
 test("installs and removes all agent configurations in an isolated home", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-adapters-"));
   const homeDir = path.join(root, "home");
-  const env = { ...process.env, PATH: "", DSH_HOME: path.join(homeDir, ".dsh"), npm_config_cache: path.join(root, "npm-cache") };
+  const env = testEnv({ PATH: "" });
   const context = adapterContext(path.join(root, "vault"), path.join(root, "dist", "cli.js"), { homeDir, env, platform: "darwin" });
   const installed = await installAgents(context, ["all"]);
   assert.equal(installed.length, 8);
@@ -58,13 +59,14 @@ test("installs and removes all agent configurations in an isolated home", async 
 
 test("distinguishes an npx-cached DeepSeek Harness from a global dsh command", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-dsh-npx-"));
-  const cache = path.join(root, "npm-cache");
+  const homeDir = path.join(root, "home");
+  const cache = path.join(homeDir, ".npm");
   const manifest = path.join(cache, "_npx", "cached-run", "node_modules", "@deepseek-ai", "dsh", "package.json");
   await mkdir(path.dirname(manifest), { recursive: true });
   await writeFile(manifest, "{}\n", "utf8");
   const context = adapterContext(path.join(root, "vault"), path.join(root, "cli.js"), {
-    homeDir: path.join(root, "home"),
-    env: { PATH: "", npm_config_cache: cache },
+    homeDir,
+    env: testEnv({ PATH: "", npm_config_cache: cache }),
     platform: "darwin"
   });
 
@@ -77,7 +79,7 @@ test("distinguishes an npx-cached DeepSeek Harness from a global dsh command", a
 test("recognizes the current Vault in Windows JSON paths", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-win-adapter-"));
   const context: AdapterContext = {
-    homeDir: path.join(root, "home"), env: { PATH: "", APPDATA: path.join(root, "appdata") }, platform: "win32",
+    homeDir: path.join(root, "home"), env: testEnv({ PATH: "", APPDATA: path.join(root, "appdata") }), platform: "win32",
     vaultPath: "C:\\Users\\Test\\OneDrive\\AgentVault",
     launch: { command: "C:\\Program Files\\nodejs\\node.exe", args: ["C:\\AgentVault\\cli.js", "mcp", "--vault", "C:\\Users\\Test\\OneDrive\\AgentVault"] }
   };
@@ -91,9 +93,24 @@ test("recognizes the current Vault in Windows JSON paths", async () => {
 
 test("uses the executable itself as the MCP command in self-contained builds", () => {
   const context = adapterContext("C:\\Users\\Test\\OneDrive\\AgentVault", "C:\\snapshot\\cli.js", {
-    homeDir: "C:\\Users\\Test", env: { PATH: "" }, platform: "win32", selfContained: true
+    homeDir: "C:\\Users\\Test", env: testEnv({ PATH: "" }), platform: "win32", selfContained: true
   });
   assert.equal(context.launch.command, process.execPath);
   assert.deepEqual(context.launch.args.slice(0, 2), ["mcp", "--vault"]);
   assert.ok(!context.launch.args.includes("C:\\snapshot\\cli.js"));
+});
+
+test("uses the supplied scrubbed environment for packaged-mode detection", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-adapter-env-"));
+  const previous = process.env.AGENT_VAULT_EXE;
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_VAULT_EXE;
+    else process.env.AGENT_VAULT_EXE = previous;
+  });
+  process.env.AGENT_VAULT_EXE = "1";
+  const cliPath = path.join(root, "cli.js");
+  const context = adapterContext(path.join(root, "vault"), cliPath, {
+    homeDir: path.join(root, "home"), env: testEnv({ PATH: "", AGENT_VAULT_EXE: "1" }), platform: "darwin"
+  });
+  assert.equal(context.launch.args[0], path.resolve(cliPath));
 });

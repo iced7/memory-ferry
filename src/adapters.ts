@@ -346,9 +346,10 @@ const adapters: Adapter[] = [
 ];
 
 export function adapterContext(vaultPath: string, cliPath: string, options: AdapterContextOptions = {}): AdapterContext {
-  const packaged = options.selfContained ?? (process.env.AGENT_VAULT_EXE === "1" || isSea() || Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg));
+  const env = options.env || process.env;
+  const packaged = options.selfContained ?? (env.AGENT_VAULT_EXE === "1" || isSea() || Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg));
   return {
-    homeDir: options.homeDir || homedir(), env: options.env || process.env, platform: options.platform || process.platform,
+    homeDir: options.homeDir || homedir(), env, platform: options.platform || process.platform,
     vaultPath: path.resolve(vaultPath), launch: { command: process.execPath, args: [...(packaged ? [] : [path.resolve(cliPath)]), "mcp", "--vault", path.resolve(vaultPath)] }
   };
 }

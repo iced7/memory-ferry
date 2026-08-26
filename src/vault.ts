@@ -140,6 +140,7 @@ export class Vault {
     if (!existing) throw new Error(`Memory not found: ${id}`);
     if (input.kind && !KINDS.includes(input.kind)) throw new Error(`Unsupported memory kind: ${input.kind}`);
     if (input.scope && !SCOPES.includes(input.scope)) throw new Error(`Unsupported memory scope: ${input.scope}`);
+    const scopeId = input.scopeId !== undefined ? input.scopeId.trim() : existing.scope.id;
     const record: MemoryRecord = {
       ...existing,
       ...(input.content !== undefined ? { content: input.content.trim() } : {}),
@@ -147,7 +148,7 @@ export class Vault {
       ...(input.kind ? { kind: input.kind } : {}),
       ...(input.tags ? { tags: uniqueStrings(input.tags) } : {}),
       ...(input.source ? (cleanSource({ ...existing.source, ...input.source }) ? { source: cleanSource({ ...existing.source, ...input.source }) } : { source: undefined }) : {}),
-      scope: input.scope || input.scopeId !== undefined ? { type: input.scope || existing.scope.type, ...(input.scopeId?.trim() ? { id: input.scopeId.trim() } : {}) } : existing.scope,
+      scope: input.scope !== undefined || input.scopeId !== undefined ? { type: input.scope || existing.scope.type, ...(scopeId ? { id: scopeId } : {}) } : existing.scope,
       updatedAt: isoDate()
     };
     if (!record.content) throw new Error("Memory content cannot be empty.");

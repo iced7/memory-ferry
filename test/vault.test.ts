@@ -60,3 +60,32 @@ test("writes no mutable database into the synced folder", async () => {
   assert.equal(manifest.format, "agent-vault-events");
   assert.equal((await vault.events()).length, 1);
 });
+
+test("updates the scope type without dropping its id", async () => {
+  const { vault } = await fixture();
+  const created = await vault.remember({ content: "Scoped memory", scope: "project", scopeId: "phoenix" });
+  const updated = await vault.update(created.id, { scope: "agent" });
+  assert.deepEqual(updated.scope, { type: "agent", id: "phoenix" });
+});
+
+test("updates and clears the scope id without changing its type", async () => {
+  const { vault } = await fixture();
+  const created = await vault.remember({ content: "Scoped memory", scope: "project", scopeId: "phoenix" });
+  const updated = await vault.update(created.id, { scopeId: "atlas" });
+  assert.deepEqual(updated.scope, { type: "project", id: "atlas" });
+  assert.deepEqual((await vault.update(created.id, { scopeId: "" })).scope, { type: "project" });
+});
+
+test("updates both scope fields together", async () => {
+  const { vault } = await fixture();
+  const created = await vault.remember({ content: "Scoped memory", scope: "project", scopeId: "phoenix" });
+  const updated = await vault.update(created.id, { scope: "agent", scopeId: "atlas" });
+  assert.deepEqual(updated.scope, { type: "agent", id: "atlas" });
+});
+
+test("keeps scope unchanged when neither scope field is provided", async () => {
+  const { vault } = await fixture();
+  const created = await vault.remember({ content: "Scoped memory", scope: "project", scopeId: "phoenix" });
+  const updated = await vault.update(created.id, { title: "Still scoped" });
+  assert.deepEqual(updated.scope, created.scope);
+});
