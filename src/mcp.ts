@@ -89,7 +89,7 @@ export function createMcpServer(vault: Vault): McpServer {
   server.registerTool("vault_status", {
     description: "Show the active shared vault and its current memory/event counts.", annotations: readOnly, inputSchema: {}
   }, async () => {
-    try { return response({ path: vault.root, manifest: await vault.manifest(), memories: (await vault.current()).size, events: (await vault.events()).length }); }
+    try { return response({ path: vault.root, manifest: await vault.manifest(), ...await vault.status() }); }
     catch (error) { return failure(error); }
   });
 

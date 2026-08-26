@@ -1,12 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, SearchOptions, VaultManifest } from "./types.js";
+import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, SearchOptions, VaultEncryption, VaultManifest } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { StateStore } from "./state.js";
 import { searchMemories } from "./search.js";
 import { ensureBuiltinSkill } from "./skills.js";
 import { isoDate, pathExists, readJson, safeSegment, stableId, uniqueStrings, writeJsonAtomic } from "./utils.js";
+import {
+  createEncryptionConfig,
+  decryptRecord,
+  deriveEncryptionKey,
+  encryptRecord,
+  keyringPath,
+  readKey,
+  removeKey,
+  validateEncryptionConfig,
+  writeKey,
+} from './encryption.js'
 import {
   cosineSimilarity,
   embeddingIndexPath,
@@ -34,11 +45,16 @@ function cleanSource(source?: MemoryRecord["source"]): MemoryRecord["source"] | 
   return Object.keys(cleaned).length ? cleaned : undefined;
 }
 
-function validateEvent(value: MemoryEvent, file: string): MemoryEvent {
+function validateEvent(value: MemoryEvent, file: string, manifest: VaultManifest): MemoryEvent {
   if (value.schemaVersion !== SCHEMA_VERSION || !value.eventId || !value.memoryId || !value.clock || !["put", "delete"].includes(value.op)) {
     throw new Error(`Invalid memory event: ${file}`);
   }
-  if (value.op === "put" && !value.record) throw new Error(`Put event is missing record: ${file}`);
+  if (value.op === 'put' && manifest.encryption) {
+    if (typeof value.ciphertext !== 'string' || !value.ciphertext) throw new Error(`Encrypted put event is missing ciphertext: ${file}`)
+    if (Object.prototype.hasOwnProperty.call(value, 'record')) throw new Error(`Encrypted put event contains a plaintext record: ${file}`)
+  } else if (value.op === "put" && !value.record) {
+    throw new Error(`Put event is missing record: ${file}`);
+  }
   return value;
 }
 
@@ -55,6 +71,11 @@ interface EventCache {
 export interface VaultEmbeddingOptions {
   env?: NodeJS.ProcessEnv
   embedder?: Embedder
+}
+
+export interface VaultEncryptionInitOptions {
+  passphrase: string
+  algo?: VaultEncryption['algo']
 }
 
 function pathIsWithin(root: string, candidate: string): boolean {
@@ -140,14 +161,43 @@ export class Vault {
   get eventsPath(): string { return path.join(this.root, "memory", "events"); }
   get eventsCachePath(): string { return path.join(this.state.home, 'cache', `${stableId(this.root)}-events.json`); }
   get embeddingsPath(): string { return embeddingIndexPath(this.state.home, this.root) }
+  get keyPath(): string { return keyringPath(this.state.home, this.root) }
 
-  static async init(root: string, name = "Agent Vault", state = new StateStore(), embedding: VaultEmbeddingOptions = {}): Promise<Vault> {
+  static async init(
+    root: string,
+    name = "Agent Vault",
+    state = new StateStore(),
+    embedding: VaultEmbeddingOptions = {},
+    encryption?: VaultEncryptionInitOptions,
+  ): Promise<Vault> {
     const vault = new Vault(root, state, embedding);
+    const exists = await pathExists(vault.manifestPath)
+    if (exists && encryption) throw new Error('Encrypted initialization requires a new vault. Use `agent-vault encrypt <path> --passphrase ...` for an existing plaintext vault.')
     await mkdir(vault.eventsPath, { recursive: true });
     await mkdir(path.join(vault.root, "skills"), { recursive: true });
-    if (!(await pathExists(vault.manifestPath))) {
-      const manifest: VaultManifest = { schemaVersion: SCHEMA_VERSION, vaultId: randomUUID(), name, createdAt: isoDate(), format: "agent-vault-events" };
-      await writeJsonAtomic(vault.manifestPath, manifest);
+    if (!exists) {
+      const encryptionConfig = encryption ? createEncryptionConfig(encryption.algo) : undefined
+      const manifest: VaultManifest = {
+        schemaVersion: SCHEMA_VERSION,
+        vaultId: randomUUID(),
+        name,
+        createdAt: isoDate(),
+        format: "agent-vault-events",
+        ...(encryptionConfig ? { encryption: encryptionConfig } : {}),
+      };
+      if (encryptionConfig) {
+        vault.assertExternalKeyring()
+        const key = await deriveEncryptionKey(encryption!.passphrase, encryptionConfig)
+        await writeKey(vault.keyPath, key)
+        try {
+          await writeJsonAtomic(vault.manifestPath, manifest)
+        } catch (error) {
+          await removeKey(vault.keyPath).catch(() => undefined)
+          throw error
+        }
+      } else {
+        await writeJsonAtomic(vault.manifestPath, manifest);
+      }
     } else {
       await vault.manifest();
     }
@@ -161,18 +211,19 @@ export class Vault {
     if (!(await pathExists(this.manifestPath))) throw new Error(`Not an Agent Vault: ${this.root}`);
     const value = await readJson<VaultManifest>(this.manifestPath);
     if (value.schemaVersion !== SCHEMA_VERSION || value.format !== "agent-vault-events") throw new Error(`Unsupported vault format: ${this.root}`);
+    if (value.encryption) validateEncryptionConfig(value.encryption)
     return value;
   }
 
   async events(): Promise<MemoryEvent[]> {
-    await this.manifest();
+    const manifest = await this.manifest();
     const tree = await eventTree(this.eventsPath);
     const cacheIsExternal = !pathIsWithin(this.root, this.eventsCachePath);
     if (cacheIsExternal) {
       try {
         const cached = await readJson<EventCache>(this.eventsCachePath);
         if (cached.fingerprint === tree.fingerprint && Array.isArray(cached.events)) {
-          return cached.events.map((event, index) => validateEvent(event, `${this.eventsCachePath}#${index}`));
+          return cached.events.map((event, index) => validateEvent(event, `${this.eventsCachePath}#${index}`, manifest));
         }
       } catch {
         // A local cache is disposable and must never make Vault reads fail.
@@ -181,7 +232,7 @@ export class Vault {
     const events: MemoryEvent[] = [];
     for (const file of tree.files) {
       try {
-        events.push(validateEvent(await readJson<MemoryEvent>(file), file));
+        events.push(validateEvent(await readJson<MemoryEvent>(file), file, manifest));
       } catch (error) {
         if (error instanceof SyntaxError) continue;
         throw error;
@@ -199,26 +250,180 @@ export class Vault {
   }
 
   async current(): Promise<Map<string, MemoryRecord>> {
-    const latest = new Map<string, MemoryEvent>();
-    for (const event of await this.events()) {
-      const previous = latest.get(event.memoryId);
-      if (!previous || compareClock(event.clock, previous.clock) > 0 || (compareClock(event.clock, previous.clock) === 0 && event.eventId > previous.eventId)) latest.set(event.memoryId, event);
-    }
+    const manifest = await this.manifest()
+    const key = manifest.encryption ? await this.requireKey() : undefined
+    const latest = this.latestEvents(await this.events())
     const current = new Map<string, MemoryRecord>();
-    for (const [id, event] of latest) if (event.op === "put" && event.record) current.set(id, event.record);
+    for (const [id, event] of latest) {
+      if (event.op !== 'put') continue
+      if (manifest.encryption) {
+        current.set(id, decryptRecord(event.ciphertext!, key!, manifest.encryption.algo))
+      } else if (event.record) {
+        current.set(id, event.record)
+      }
+    }
     return current;
   }
 
+  async status(): Promise<{ encrypted: boolean; unlocked: boolean; memories: number; events: number }> {
+    const manifest = await this.manifest()
+    const events = await this.events()
+    const latest = this.latestEvents(events)
+    return {
+      encrypted: Boolean(manifest.encryption),
+      unlocked: !manifest.encryption || await this.isUnlocked(events, manifest.encryption),
+      memories: [...latest.values()].filter((event) => event.op === 'put').length,
+      events: events.length,
+    }
+  }
+
   private async append(op: 'put' | 'delete', memoryId: string, record?: MemoryRecord): Promise<MemoryEvent> {
-    await this.manifest()
+    const manifest = await this.manifest()
+    const key = manifest.encryption ? await this.requireKey() : undefined
     const device = await this.state.deviceFor(this.root)
     const recentClocks = await recentEventClocks(this.eventsPath, device.deviceId)
     const clock = await this.state.nextClock(this.root, recentClocks.slice(-20))
-    const event: MemoryEvent = { schemaVersion: SCHEMA_VERSION, eventId: randomUUID(), memoryId, op, clock, createdAt: isoDate(), deviceId: device.deviceId, ...(record ? { record } : {}) };
+    const event: MemoryEvent = {
+      schemaVersion: SCHEMA_VERSION,
+      eventId: randomUUID(),
+      memoryId,
+      op,
+      clock,
+      createdAt: isoDate(),
+      deviceId: device.deviceId,
+      ...(record && manifest.encryption ? { ciphertext: encryptRecord(record, key!, manifest.encryption.algo) } : {}),
+      ...(record && !manifest.encryption ? { record } : {}),
+    };
     const date = event.createdAt.slice(0, 10);
     const file = path.join(this.eventsPath, safeSegment(device.deviceId), date, `${clock.wallTime}-${clock.counter}-${safeSegment(event.eventId)}.json`);
     await writeJsonAtomic(file, event);
     return event;
+  }
+
+  async unlock(passphrase: string): Promise<void> {
+    const manifest = await this.manifest()
+    if (!manifest.encryption) throw new Error('Vault is not encrypted.')
+    this.assertExternalKeyring()
+    const key = await deriveEncryptionKey(passphrase, manifest.encryption)
+    const put = (await this.events()).find((event) => event.op === 'put')
+    if (put) {
+      try {
+        decryptRecord(put.ciphertext!, key, manifest.encryption.algo)
+      } catch {
+        throw new Error('Incorrect passphrase for encrypted vault.')
+      }
+    }
+    await writeKey(this.keyPath, key)
+  }
+
+  async lock(): Promise<boolean> {
+    const manifest = await this.manifest()
+    if (!manifest.encryption) throw new Error('Vault is not encrypted.')
+    this.assertExternalKeyring()
+    return await removeKey(this.keyPath)
+  }
+
+  async encrypt(passphrase: string, algo: VaultEncryption['algo'] = 'chacha20-poly1305'): Promise<VaultEncryption> {
+    const manifest = await this.manifest()
+    if (manifest.encryption) throw new Error('Vault is already encrypted.')
+    this.assertExternalKeyring()
+
+    const encryption = createEncryptionConfig(algo)
+    const encryptedManifest: VaultManifest = { ...manifest, encryption }
+    const key = await deriveEncryptionKey(passphrase, encryption)
+    const tree = await eventTree(this.eventsPath)
+    const staged: Array<{ file: string; pending: string; original: Buffer; mode: number }> = []
+
+    try {
+      for (const file of tree.files) {
+        const original = await readFile(file)
+        const event = validateEvent(JSON.parse(original.toString('utf8')) as MemoryEvent, file, manifest)
+        if (event.op !== 'put') continue
+        const metadata = await stat(file)
+        if ((metadata.mode & 0o222) === 0) throw new Error(`Cannot convert read-only event file: ${file}`)
+        const { record, ...envelope } = event
+        const converted: MemoryEvent = {
+          ...envelope,
+          ciphertext: encryptRecord(record!, key, encryption.algo),
+        }
+        const pending = `${file}.enc-pending-${process.pid}-${randomUUID()}`
+        staged.push({ file, pending, original, mode: metadata.mode & 0o777 })
+        await writeFile(pending, `${JSON.stringify(converted, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
+        await chmod(pending, metadata.mode & 0o777)
+        const verified = validateEvent(await readJson<MemoryEvent>(pending), pending, encryptedManifest)
+        if (JSON.stringify(decryptRecord(verified.ciphertext!, key, encryption.algo)) !== JSON.stringify(record)) {
+          throw new Error(`Failed to verify converted event: ${file}`)
+        }
+      }
+    } catch (error) {
+      await Promise.all(staged.map(({ pending }) => rm(pending, { force: true }).catch(() => undefined)))
+      throw error
+    }
+
+    const committed: typeof staged = []
+    const previousKey = await pathExists(this.keyPath) ? await readFile(this.keyPath) : undefined
+    let keyWritten = false
+    try {
+      for (const item of staged) {
+        await rename(item.pending, item.file)
+        committed.push(item)
+      }
+      await writeKey(this.keyPath, key)
+      keyWritten = true
+      await writeJsonAtomic(this.manifestPath, encryptedManifest)
+    } catch (error) {
+      await Promise.all(committed.map(async ({ file, original, mode }) => {
+        const pending = `${file}.rollback-pending-${process.pid}-${randomUUID()}`
+        await writeFile(pending, original)
+        await chmod(pending, mode)
+        await rename(pending, file)
+      }))
+      await Promise.all(staged.map(({ pending }) => rm(pending, { force: true }).catch(() => undefined)))
+      if (keyWritten) {
+        if (previousKey) {
+          await writeFile(this.keyPath, previousKey, { mode: 0o600 })
+        } else {
+          await removeKey(this.keyPath).catch(() => undefined)
+        }
+      }
+      throw error
+    }
+    await rm(this.eventsCachePath, { force: true }).catch(() => undefined)
+    return encryption
+  }
+
+  private latestEvents(events: MemoryEvent[]): Map<string, MemoryEvent> {
+    const latest = new Map<string, MemoryEvent>()
+    for (const event of events) {
+      const previous = latest.get(event.memoryId)
+      if (!previous || compareClock(event.clock, previous.clock) > 0 || (compareClock(event.clock, previous.clock) === 0 && event.eventId > previous.eventId)) {
+        latest.set(event.memoryId, event)
+      }
+    }
+    return latest
+  }
+
+  private assertExternalKeyring(): void {
+    if (pathIsWithin(this.root, this.keyPath)) {
+      throw new Error('The local keyring must be outside the synchronized vault folder.')
+    }
+  }
+
+  private async requireKey(): Promise<Buffer> {
+    this.assertExternalKeyring()
+    return await readKey(this.keyPath)
+  }
+
+  private async isUnlocked(events: MemoryEvent[], encryption: VaultEncryption): Promise<boolean> {
+    this.assertExternalKeyring()
+    try {
+      const key = await readKey(this.keyPath)
+      const put = events.find((event) => event.op === 'put')
+      if (put) decryptRecord(put.ciphertext!, key, encryption.algo)
+      return true
+    } catch {
+      return false
+    }
   }
 
   async remember(input: RememberInput): Promise<MemoryRecord> {
