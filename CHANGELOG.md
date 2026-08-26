@@ -2,6 +2,8 @@
 
 ## 0.5.0 - Unreleased
 
+- append() no longer rescans the full event log (recent-clock window from file names), sequential writes are no longer quadratic.
+- Added a fingerprint-based local event cache (no full re-parse per operation).
 - Fixed memory scope updates so changing a scope type preserves its ID and changing an ID preserves its type.
 - Made the test environment hermetic so real user Agent configuration cannot be detected or rewritten.
 - Added ownership markers to synced Skills and pruning for stale Agent Vault-managed copies while preserving user-owned directories.

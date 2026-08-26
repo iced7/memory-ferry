@@ -53,6 +53,20 @@ test("keeps concurrent writes as independent immutable files", async () => {
   assert.equal(new Set(rawFiles).size, count);
 });
 
+test('keeps sequential writes independent of the full event log', { timeout: 70_000 }, async () => {
+  const { vault } = await fixture()
+  const count = 1200
+  const startedAt = Date.now()
+
+  for (let index = 0; index < count; index += 1) {
+    await vault.remember({ content: `Sequential memory ${index}`, kind: 'fact' })
+  }
+
+  // Regression guard against O(n²) writes; this generous limit is not a benchmark.
+  assert.ok(Date.now() - startedAt < 60_000)
+  assert.equal((await vault.events()).length, count)
+})
+
 test("writes no mutable database into the synced folder", async () => {
   const { vault } = await fixture();
   await vault.remember({ content: "Folder synchronization should stay conflict-safe" });

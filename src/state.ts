@@ -10,10 +10,12 @@ export function stateHome(env = process.env, homeDir = homedir()): string {
 }
 
 export class StateStore {
+  readonly home: string;
   readonly file: string;
 
   constructor(home = stateHome()) {
-    this.file = path.join(home, "state.json");
+    this.home = path.resolve(home);
+    this.file = path.join(this.home, "state.json");
   }
 
   async load(): Promise<LocalState> {

@@ -1,15 +1,16 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readdir } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, VaultManifest } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { StateStore } from "./state.js";
 import { searchMemories } from "./search.js";
 import { ensureBuiltinSkill } from "./skills.js";
-import { isoDate, pathExists, readJson, safeSegment, uniqueStrings, writeJsonAtomic } from "./utils.js";
+import { isoDate, pathExists, readJson, safeSegment, stableId, uniqueStrings, writeJsonAtomic } from "./utils.js";
 
 const KINDS: MemoryKind[] = ["fact", "preference", "decision", "lesson", "note", "task"];
 const SCOPES = ["global", "project", "agent"] as const;
+const RECENT_CLOCK_FILE_LIMIT = 30
 
 function compareClock(a: HybridLogicalClock, b: HybridLogicalClock): number {
   return a.wallTime - b.wallTime || a.counter - b.counter || a.node.localeCompare(b.node);
@@ -29,19 +30,78 @@ function validateEvent(value: MemoryEvent, file: string): MemoryEvent {
   return value;
 }
 
-async function jsonFiles(root: string): Promise<string[]> {
-  if (!(await pathExists(root))) return [];
+interface EventTree {
+  files: string[];
+  fingerprint: string;
+}
+
+interface EventCache {
+  fingerprint: string;
+  events: MemoryEvent[];
+}
+
+function pathIsWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+async function eventTree(root: string): Promise<EventTree> {
   const found: string[] = [];
+  if (await pathExists(root)) await visit(root);
+
   async function visit(dir: string): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) await visit(full);
-      else if (entry.isFile() && entry.name.endsWith(".json") && !entry.name.includes(".pending-")) found.push(full);
+      else if (entry.isFile() && entry.name.endsWith('.json') && !entry.name.includes('.pending-')) found.push(full);
     }
   }
-  await visit(root);
-  return found;
+
+  const files = found.sort((a, b) => path.relative(root, a).localeCompare(path.relative(root, b)));
+  const entries = await Promise.all(files.map(async (file) => {
+    const metadata = await stat(file);
+    return [path.relative(root, file).split(path.sep).join('/'), metadata.size, metadata.mtimeMs] as const;
+  }));
+  // Fingerprinting metadata avoids reading every event. A same-size file restored to the
+  // same mtime would be missed, which is acceptable for cloud-drive sync; newest-file
+  // content is intentionally not hashed.
+  const fingerprint = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+  return { files, fingerprint };
+}
+
+async function recentEventClocks(root: string, node: string): Promise<HybridLogicalClock[]> {
+  const clocks: HybridLogicalClock[] = []
+  if (await pathExists(root)) await visit(root)
+
+  async function visit(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        await visit(path.join(dir, entry.name))
+        continue
+      }
+      if (!entry.isFile() || entry.name.includes('.pending-')) continue
+      const match = /^(\d+)-(\d+)-.+\.json$/.exec(entry.name)
+      if (!match) continue
+      const clock = {
+        wallTime: Number.parseInt(match[1], 10),
+        counter: Number.parseInt(match[2], 10),
+        node,
+      }
+      const insertAt = clocks.findIndex((candidate) =>
+        clock.wallTime > candidate.wallTime
+        || clock.wallTime === candidate.wallTime && clock.counter > candidate.counter
+      )
+      if (insertAt >= 0) clocks.splice(insertAt, 0, clock)
+      else if (clocks.length < RECENT_CLOCK_FILE_LIMIT) clocks.push(clock)
+      if (clocks.length > RECENT_CLOCK_FILE_LIMIT) clocks.pop()
+    }
+  }
+
+  // The bounded window is selected newest-first, then restored to the ascending
+  // order used by events() so slice(-20) observes the same newest clocks.
+  return clocks.reverse()
 }
 
 export class Vault {
@@ -55,6 +115,7 @@ export class Vault {
 
   get manifestPath(): string { return path.join(this.root, "agent-vault.json"); }
   get eventsPath(): string { return path.join(this.root, "memory", "events"); }
+  get eventsCachePath(): string { return path.join(this.state.home, 'cache', `${stableId(this.root)}-events.json`); }
 
   static async init(root: string, name = "Agent Vault", state = new StateStore()): Promise<Vault> {
     const vault = new Vault(root, state);
@@ -81,9 +142,20 @@ export class Vault {
 
   async events(): Promise<MemoryEvent[]> {
     await this.manifest();
-    const files = await jsonFiles(this.eventsPath);
+    const tree = await eventTree(this.eventsPath);
+    const cacheIsExternal = !pathIsWithin(this.root, this.eventsCachePath);
+    if (cacheIsExternal) {
+      try {
+        const cached = await readJson<EventCache>(this.eventsCachePath);
+        if (cached.fingerprint === tree.fingerprint && Array.isArray(cached.events)) {
+          return cached.events.map((event, index) => validateEvent(event, `${this.eventsCachePath}#${index}`));
+        }
+      } catch {
+        // A local cache is disposable and must never make Vault reads fail.
+      }
+    }
     const events: MemoryEvent[] = [];
-    for (const file of files) {
+    for (const file of tree.files) {
       try {
         events.push(validateEvent(await readJson<MemoryEvent>(file), file));
       } catch (error) {
@@ -91,7 +163,15 @@ export class Vault {
         throw error;
       }
     }
-    return events.sort((a, b) => compareClock(a.clock, b.clock) || a.eventId.localeCompare(b.eventId));
+    events.sort((a, b) => compareClock(a.clock, b.clock) || a.eventId.localeCompare(b.eventId));
+    if (cacheIsExternal) {
+      try {
+        await writeJsonAtomic(this.eventsCachePath, { fingerprint: tree.fingerprint, events } satisfies EventCache);
+      } catch {
+        // Cache writes are best-effort and stay outside the synchronized Vault.
+      }
+    }
+    return events;
   }
 
   async current(): Promise<Map<string, MemoryRecord>> {
@@ -105,10 +185,11 @@ export class Vault {
     return current;
   }
 
-  private async append(op: "put" | "delete", memoryId: string, record?: MemoryRecord): Promise<MemoryEvent> {
-    const allEvents = await this.events();
-    const device = await this.state.deviceFor(this.root);
-    const clock = await this.state.nextClock(this.root, allEvents.slice(-20).map((event) => event.clock));
+  private async append(op: 'put' | 'delete', memoryId: string, record?: MemoryRecord): Promise<MemoryEvent> {
+    await this.manifest()
+    const device = await this.state.deviceFor(this.root)
+    const recentClocks = await recentEventClocks(this.eventsPath, device.deviceId)
+    const clock = await this.state.nextClock(this.root, recentClocks.slice(-20))
     const event: MemoryEvent = { schemaVersion: SCHEMA_VERSION, eventId: randomUUID(), memoryId, op, clock, createdAt: isoDate(), deviceId: device.deviceId, ...(record ? { record } : {}) };
     const date = event.createdAt.slice(0, 10);
     const file = path.join(this.eventsPath, safeSegment(device.deviceId), date, `${clock.wallTime}-${clock.counter}-${safeSegment(event.eventId)}.json`);
