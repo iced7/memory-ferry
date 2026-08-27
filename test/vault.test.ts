@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -72,8 +72,35 @@ test("writes no mutable database into the synced folder", async () => {
   const { vault } = await fixture();
   await vault.remember({ content: "Folder synchronization should stay conflict-safe" });
   const manifest = JSON.parse(await readFile(vault.manifestPath, "utf8"));
-  assert.equal(manifest.format, "agent-vault-events");
+  assert.equal(manifest.format, "memory-ferry-events");
   assert.equal((await vault.events()).length, 1);
+});
+
+test("opens a legacy Agent Vault and writes a companion Memory Ferry manifest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "memory-ferry-legacy-vault-"));
+  const vaultPath = path.join(root, "synced");
+  await mkdir(vaultPath, { recursive: true });
+  const legacy = { schemaVersion: 1, format: "agent-vault-events", vaultId: "legacy-vault-id", name: "Legacy", createdAt: "2026-01-01T00:00:00.000Z" };
+  await writeFile(path.join(vaultPath, "agent-vault.json"), `${JSON.stringify(legacy)}\n`, "utf8");
+  const vault = new Vault(vaultPath, new StateStore(path.join(root, "state")), unavailableEmbedding);
+  const manifest = await vault.manifest();
+  assert.equal(manifest.vaultId, legacy.vaultId);
+  assert.equal(manifest.format, "memory-ferry-events");
+  assert.equal(JSON.parse(await readFile(path.join(vaultPath, "memory-ferry.json"), "utf8")).vaultId, legacy.vaultId);
+  assert.equal(JSON.parse(await readFile(path.join(vaultPath, "agent-vault.json"), "utf8")).format, "agent-vault-events");
+});
+
+test("migrates legacy local state without modifying the legacy file", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "memory-ferry-legacy-state-"));
+  const legacyHome = path.join(root, ".agent-vault-sync");
+  const currentHome = path.join(root, ".memory-ferry");
+  await mkdir(legacyHome, { recursive: true });
+  const legacy = { schemaVersion: 1, devices: {}, defaultVault: path.join(root, "vault") };
+  await writeFile(path.join(legacyHome, "state.json"), `${JSON.stringify(legacy)}\n`, "utf8");
+  const store = new StateStore(currentHome, legacyHome);
+  assert.deepEqual(await store.load(), legacy);
+  assert.deepEqual(JSON.parse(await readFile(store.file, "utf8")), legacy);
+  assert.deepEqual(JSON.parse(await readFile(path.join(legacyHome, "state.json"), "utf8")), legacy);
 });
 
 test("updates the scope type without dropping its id", async () => {

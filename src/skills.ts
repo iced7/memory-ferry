@@ -1,11 +1,13 @@
-import { cp, lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { pathExists } from "./utils.js";
+import { CLI_NAME, LEGACY_MEMORY_SKILL_NAME, MEMORY_SKILL_NAME } from "./brand.js";
 
-export const MEMORY_SKILL_NAME = "agent-vault-memory";
-const SYNC_MARKER = ".agent-vault-sync.json";
+export { MEMORY_SKILL_NAME } from "./brand.js";
+const SYNC_MARKER = ".memory-ferry-sync.json";
+const LEGACY_SYNC_MARKER = ".agent-vault-sync.json";
 
 interface SyncMarker {
   skill: string;
@@ -14,13 +16,13 @@ interface SyncMarker {
 }
 
 export const MEMORY_SKILL = `---
-name: agent-vault-memory
+name: memory-ferry-memory
 description: Use shared, persistent long-term memory across coding and general AI agents. Recall relevant prior preferences, decisions, facts, lessons, and project context; save durable information when the user asks or when it will materially help future sessions.
 ---
 
-# Agent Vault Memory
+# Memory Ferry
 
-Use the Agent Vault MCP tools when they are available.
+Use the Memory Ferry MCP tools when they are available.
 
 ## Recall
 
@@ -38,18 +40,20 @@ Use the Agent Vault MCP tools when they are available.
 
 ## CLI fallback
 
-If MCP is unavailable but the \`agent-vault\` command exists:
+If MCP is unavailable but the \`${CLI_NAME}\` command exists:
 
-\`agent-vault recall "query" --json\`
+\`${CLI_NAME} recall "query" --json\`
 
-\`agent-vault remember "durable fact" --kind fact --scope project --scope-id "project-name"\`
+\`${CLI_NAME} remember "durable fact" --kind fact --scope project --scope-id "project-name"\`
 `;
 
 export async function ensureBuiltinSkill(vaultPath: string): Promise<string> {
   const skillDir = path.join(vaultPath, "skills", MEMORY_SKILL_NAME);
+  const legacyDir = path.join(vaultPath, "skills", LEGACY_MEMORY_SKILL_NAME);
+  if (!(await pathExists(skillDir)) && await pathExists(legacyDir)) await rename(legacyDir, skillDir);
   await mkdir(skillDir, { recursive: true });
   const skillFile = path.join(skillDir, "SKILL.md");
-  if (!(await pathExists(skillFile))) await writeFile(skillFile, MEMORY_SKILL, "utf8");
+  if (!(await pathExists(skillFile)) || (await readFile(skillFile, "utf8")).includes("name: agent-vault-memory")) await writeFile(skillFile, MEMORY_SKILL, "utf8");
   return skillDir;
 }
 
@@ -73,7 +77,7 @@ async function digestDirectory(root: string, ignoreSyncMarker = false): Promise<
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       const relative = path.relative(root, full).split(path.sep).join("/");
-      if (ignoreSyncMarker && relative === SYNC_MARKER) continue;
+      if (ignoreSyncMarker && [SYNC_MARKER, LEGACY_SYNC_MARKER].includes(relative)) continue;
       hash.update(relative);
       if (entry.isDirectory()) await visit(full);
       else if (entry.isFile()) hash.update(await readFile(full));
@@ -84,17 +88,20 @@ async function digestDirectory(root: string, ignoreSyncMarker = false): Promise<
 }
 
 async function readSyncMarker(skillPath: string): Promise<SyncMarker | undefined> {
-  try {
-    const marker = JSON.parse(await readFile(path.join(skillPath, SYNC_MARKER), "utf8")) as Partial<SyncMarker>;
-    if (typeof marker.skill === "string" && typeof marker.vault === "string" && typeof marker.hash === "string") return marker as SyncMarker;
-  } catch {
-    // Missing or malformed markers do not confer ownership.
+  for (const filename of [SYNC_MARKER, LEGACY_SYNC_MARKER]) {
+    try {
+      const marker = JSON.parse(await readFile(path.join(skillPath, filename), "utf8")) as Partial<SyncMarker>;
+      if (typeof marker.skill === "string" && typeof marker.vault === "string" && typeof marker.hash === "string") return marker as SyncMarker;
+    } catch {
+      // Missing or malformed markers do not confer ownership.
+    }
   }
   return undefined;
 }
 
 async function writeSyncMarker(skillPath: string, marker: SyncMarker): Promise<void> {
   await writeFile(path.join(skillPath, SYNC_MARKER), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  await rm(path.join(skillPath, LEGACY_SYNC_MARKER), { force: true });
 }
 
 export async function syncSkills(vaultPath: string, destination = path.join(homedir(), ".agents", "skills")): Promise<Array<{ name: string; changed: boolean; destination: string }>> {

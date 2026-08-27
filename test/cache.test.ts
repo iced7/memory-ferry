@@ -145,7 +145,7 @@ test('stores event caches only in local state, never in the synced vault', async
 
   const relativeFiles = (await filesWithin(vault.root)).map((file) => path.relative(vault.root, file).split(path.sep).join('/'))
   assert.ok(relativeFiles.every((file) =>
-    file === 'agent-vault.json'
+    file === 'memory-ferry.json'
     || file.startsWith('skills/')
     || file.startsWith('memory/events/') && file.endsWith('.json')
   ))

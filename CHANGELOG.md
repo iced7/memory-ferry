@@ -1,8 +1,31 @@
 # Changelog
 
-## 0.5.0 - Unreleased
+## 0.6.0-beta.1 - 2026-08-27
 
-- Optional semantic recall via local Ollama embeddings (`AGENT_VAULT_EMBED_MODEL`, `AGENT_VAULT_EMBED=off` to disable), hybrid scoring with text fallback.
+- Renamed the product, npm package, CLI, manifest, local state, managed Agent configuration, built-in Skill, MiniMax plugin, and Windows executable to Memory Ferry.
+- Added conservative migration for legacy manifests, local state, environment variables, managed Agent entries, and Skills; retained the legacy CLI alias during beta.
+- Added a Chinese/English dashboard switch, English and Chinese documentation, community/security files, release automation, and bundled license notices.
+- Changed the standalone Windows executable to the GUI subsystem so double-click startup no longer opens a console window.
+- Added a dashboard exit control and made repeat double-clicks reopen the already-running dashboard instead of failing silently.
+- Added a Windows command-line wrapper plus CI checks for the GUI subsystem, captured CLI output, recall, and dashboard startup.
+- Added a persistent startup-error log at `%USERPROFILE%\\.memory-ferry\\memory-ferry.log` for failures that would otherwise be hidden.
+
+## 0.5.2 - 2026-08-27
+
+- Reworked the dashboard's top area into balanced Vault panels with on-demand add and migration dialogs.
+- Replaced the misleading Codex “global command missing” badge with configuration-aware status text.
+- Kept the Windows folder chooser above the browser by assigning it a topmost owner window.
+- Reduced background Skill reconciliation from 15 seconds to 5 minutes and changed page status polling to a non-flickering 60-second diff refresh.
+
+## 0.5.1 - 2026-08-27
+
+- Fixed the Windows self-contained executable by emitting a CommonJS SEA entry point instead of an incompatible ES module.
+- Added a build-time execution check for the bundled entry point before creating the Windows executable.
+
+## 0.5.0 - 2026-08-27
+
+- Optional semantic recall via local Ollama embeddings (`MEMORY_FERRY_EMBED_MODEL`, `MEMORY_FERRY_EMBED=off` to disable), hybrid scoring with text fallback.
+- Semantic indexes now repair synced and migrated memories before the first search returns, batch index writes, and deduplicate concurrent in-process refreshes.
 - append() no longer rescans the full event log (recent-clock window from file names), sequential writes are no longer quadratic.
 - Added a fingerprint-based local event cache (no full re-parse per operation).
 - Fixed memory scope updates so changing a scope type preserves its ID and changing an ID preserves its type.
@@ -43,13 +66,13 @@
 
 ## 0.2.0 - 2026-08-26
 
-- Added a cross-platform local Web dashboard through `agent-vault ui`.
+- Added a cross-platform local Web dashboard through `memory-ferry ui`.
 - Added Vault/provider health, writable state, counters, and latest-event status.
 - Added per-Agent detected, connected, current-Vault, and launch-path status.
 - Added graphical Vault initialization/selection and Agent connect/disconnect controls.
 - Added native macOS and Windows directory pickers, Skill sync, loopback-only binding, session-token API protection, and CSP.
 - Added HTTP API and browser-based visual acceptance tests.
-- Added a self-contained Windows x64 `AgentVault.exe` build based on Node SEA; double-click launches the dashboard and CLI/MCP modes remain available.
+- Added a self-contained Windows x64 `MemoryFerry.exe` build based on Node SEA; double-click launches the dashboard and CLI/MCP modes remain available.
 - Added embedded UI assets, self-contained MCP launch configuration, Windows executable CI smoke tests, and release artifact upload.
 
 ## 0.1.0 - 2026-08-25

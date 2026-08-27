@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { StateStore } from "../src/state.js";
-import { startUiServer } from "../src/ui.js";
+import { SKILL_SYNC_INTERVAL_MS, WINDOWS_FOLDER_PICKER_SCRIPT, startUiServer } from "../src/ui.js";
 import { Vault } from "../src/vault.js";
 import { testEnv } from "./helpers.js";
 import { unavailableEmbedding } from './helpers.js'
@@ -26,7 +26,17 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
 
   const page = await fetch(handle.url);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Agent Vault 控制台/);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, /Memory Ferry · 记忆摆渡/);
+  assert.match(pageHtml, /value="en">English/);
+  assert.match(pageHtml, /自动同步 Agent 配置与 Skill/);
+  assert.doesNotMatch(pageHtml, /页面每 60 秒静默检查状态|Status is checked quietly|后台每 5 分钟补充检查|verify in the background/);
+  assert.match(pageHtml, /id="add-vault-dialog"/);
+  assert.match(pageHtml, /id="migrate-vault-dialog"/);
+  assert.match(pageHtml, /id="shutdown"/);
+  assert.match(pageHtml, /Codex 配置可用/);
+  assert.match(pageHtml, /setInterval\(\(\)=>\{if\(!document\.hidden\)load\(\{quiet:true\}\);\},60000\)/);
+  assert.doesNotMatch(pageHtml, /setInterval\(.*15000/);
   assert.match(page.headers.get("content-security-policy") || "", /default-src 'self'/);
 
   const denied = await fetch(`${handle.url}/api/status`);
@@ -53,8 +63,8 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   const codex = (await api("/api/status")).value.agents.find((agent: any) => agent.id === "codex");
   assert.equal(codex.connected, true);
   assert.equal(codex.current, true);
-  assert.match(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), /agent-vault/);
-  assert.match(await readFile(path.join(homeDir, ".agents", "skills", "agent-vault-memory", "SKILL.md"), "utf8"), /memory_recall/);
+  assert.match(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), /memory-ferry/);
+  assert.match(await readFile(path.join(homeDir, ".agents", "skills", "memory-ferry-memory", "SKILL.md"), "utf8"), /memory_recall/);
 
   await new Vault(vaultPath, state, unavailableEmbedding).remember({ content: "migrate this memory" });
   const secondVault = path.join(root, "synced", "SecondVault");
@@ -82,8 +92,21 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   assert.equal((await api("/api/agents/codex/disconnect", { method: "POST" })).response.status, 200);
   assert.equal((await api("/api/vault/disconnect", { method: "POST" })).response.status, 200);
   assert.equal((await api("/api/status")).value.vault, null);
+
+  assert.equal((await api("/api/shutdown", { method: "POST" })).response.status, 200);
+  await new Promise<void>((resolve) => {
+    if (!handle.server.listening) resolve();
+    else handle.server.once("close", resolve);
+  });
+  assert.equal(handle.server.listening, false);
 });
 
 test("refuses to expose the dashboard beyond loopback", async () => {
   await assert.rejects(() => startUiServer({ cliPath: "/tmp/cli.js", host: "0.0.0.0", port: 0, open: false }), /only listen on the local machine/);
+});
+
+test("uses a topmost Windows folder-picker owner and a low-frequency Skill fallback", () => {
+  assert.match(WINDOWS_FOLDER_PICKER_SCRIPT, /TopMost=\$true/);
+  assert.match(WINDOWS_FOLDER_PICKER_SCRIPT, /ShowDialog\(\$owner\)/);
+  assert.equal(SKILL_SYNC_INTERVAL_MS, 5 * 60_000);
 });

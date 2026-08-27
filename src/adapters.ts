@@ -1,10 +1,11 @@
-import { access, chmod, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 import path from "node:path";
 import { isSea } from "node:sea";
 import { backupFile, deleteNested, getNested, setNested, updateJsonFile, updateMarkedText } from "./config.js";
 import { pathExists, readJson } from "./utils.js";
+import { CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE, PRODUCT_NAME, VERSION } from "./brand.js";
 
 export type AgentId = "codex" | "claude" | "cursor" | "opencode" | "deepseek-harness" | "gemini" | "copilot" | "minimax-code";
 
@@ -85,8 +86,8 @@ function containsString(value: unknown, target: string): boolean {
   return false;
 }
 
-function minimaxPluginRoot(context: AdapterContext): string {
-  return path.join(context.env.MINIMAX_DATA_DIR || path.join(context.homeDir, ".minimax"), "plugins", "agent-vault");
+function minimaxPluginRoot(context: AdapterContext, namespace = CONFIG_NAMESPACE): string {
+  return path.join(context.env.MINIMAX_DATA_DIR || path.join(context.homeDir, ".minimax"), "plugins", namespace);
 }
 
 function quoteShell(value: string): string {
@@ -99,10 +100,10 @@ function quoteCmd(value: string): string {
 
 function minimaxLaunch(context: AdapterContext): { file: string; content: string; spec: Record<string, unknown> } {
   const mcpIndex = context.launch.args.indexOf("mcp");
-  if (mcpIndex < 0) throw new Error("Agent Vault MCP launch arguments are incomplete.");
+  if (mcpIndex < 0) throw new Error(`${PRODUCT_NAME} MCP launch arguments are incomplete.`);
   const prefix = [context.launch.command, ...context.launch.args.slice(0, mcpIndex)];
   const windows = context.platform === "win32";
-  const filename = windows ? "agent-vault-mcp.cmd" : "agent-vault-mcp";
+  const filename = windows ? "memory-ferry-mcp.cmd" : "memory-ferry-mcp";
   const command = windows ? prefix.map(quoteCmd).join(" ") : prefix.map(quoteShell).join(" ");
   const content = windows ? `@echo off\r\n${command} %*\r\n` : `#!/bin/sh\nexec ${command} "$@"\n`;
   return {
@@ -131,13 +132,17 @@ async function writeGeneratedFile(file: string, content: string, executable = fa
 }
 
 async function updateDshPatch(file: string, block?: string): Promise<{ changed: boolean; backup?: string }> {
-  const start = "# >>> agent-vault:deepseek-harness-mcp >>>";
-  const end = "# <<< agent-vault:deepseek-harness-mcp <<<";
   const old = await pathExists(file) ? await readFile(file, "utf8") : "";
-  const escapedStart = start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const stripped = old.replace(new RegExp(`(?:^|\\n)${escapedStart}[\\s\\S]*?${escapedEnd}(?:\\n|$)`, "g"), "\n").trim();
+  let without = old;
+  for (const namespace of [CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE]) {
+    const start = `# >>> ${namespace}:deepseek-harness-mcp >>>`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const end = `# <<< ${namespace}:deepseek-harness-mcp <<<`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    without = without.replace(new RegExp(`(?:^|\\n)${start}[\\s\\S]*?${end}(?:\\n|$)`, "g"), "\n");
+  }
+  const stripped = without.trim();
   const base = stripped === "[]" ? "" : stripped;
+  const start = `# >>> ${CONFIG_NAMESPACE}:deepseek-harness-mcp >>>`;
+  const end = `# <<< ${CONFIG_NAMESPACE}:deepseek-harness-mcp <<<`;
   const next = block
     ? `${base}${base ? "\n\n" : ""}${start}\n${block.trim()}\n${end}\n`
     : base ? `${base}\n` : "[]\n";
@@ -154,6 +159,7 @@ function jsonAdapter(options: {
   binaries: string[];
   config: (context: AdapterContext) => string;
   keys: string[];
+  legacyKeys?: string[];
   spec: (launch: McpLaunch) => unknown;
   skills: (context: AdapterContext) => string[];
 }): Adapter {
@@ -171,22 +177,34 @@ function jsonAdapter(options: {
       if (!(await pathExists(configPath))) return { connected: false, current: false, launchCurrent: false };
       try {
         const value = await readJson<Record<string, unknown>>(configPath);
-        const configured = getNested(value, options.keys);
+        const currentConfigured = getNested(value, options.keys);
+        const legacyConfigured = options.legacyKeys ? getNested(value, options.legacyKeys) : undefined;
+        const configured = currentConfigured ?? legacyConfigured;
         const serialized = JSON.stringify(configured);
-        return { connected: configured !== undefined, current: containsString(configured, context.vaultPath), launchCurrent: serialized === JSON.stringify(options.spec(context.launch)) };
+        return {
+          connected: configured !== undefined,
+          current: containsString(configured, context.vaultPath),
+          launchCurrent: currentConfigured !== undefined && serialized === JSON.stringify(options.spec(context.launch))
+        };
       } catch {
         return { connected: false, current: false, launchCurrent: false };
       }
     },
     async install(context) {
       const configPath = options.config(context);
-      const result = await updateJsonFile(configPath, (value) => setNested(value, options.keys, options.spec(context.launch)));
+      const result = await updateJsonFile(configPath, (value) => {
+        if (options.legacyKeys) deleteNested(value, options.legacyKeys);
+        setNested(value, options.keys, options.spec(context.launch));
+      });
       return { id: options.id, label: options.label, configPath, ...result };
     },
     async uninstall(context) {
       const configPath = options.config(context);
       if (!(await pathExists(configPath))) return { id: options.id, label: options.label, configPath, changed: false };
-      const result = await updateJsonFile(configPath, (value) => deleteNested(value, options.keys));
+      const result = await updateJsonFile(configPath, (value) => {
+        deleteNested(value, options.keys);
+        if (options.legacyKeys) deleteNested(value, options.legacyKeys);
+      });
       return { id: options.id, label: options.label, configPath, ...result };
     }
   };
@@ -210,12 +228,12 @@ const adapters: Adapter[] = [
       const configPath = this.configPath(context);
       if (!(await pathExists(configPath))) return { connected: false, current: false, launchCurrent: false };
       const text = await readFile(configPath, "utf8");
-      const connected = text.includes("# >>> agent-vault:codex-mcp >>>");
+      const connected = [CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE].some((namespace) => text.includes(`# >>> ${namespace}:codex-mcp >>>`));
       return { connected, current: connected && text.includes(JSON.stringify(context.vaultPath)), launchCurrent: connected && text.includes(JSON.stringify(context.vaultPath)) && text.includes(JSON.stringify(context.launch.args[0])) };
     },
     async install(context) {
       const configPath = this.configPath(context);
-      const block = `[mcp_servers.agent-vault]\ncommand = ${JSON.stringify(context.launch.command)}\nargs = ${JSON.stringify(context.launch.args)}`;
+      const block = `[mcp_servers.${CONFIG_NAMESPACE}]\ncommand = ${JSON.stringify(context.launch.command)}\nargs = ${JSON.stringify(context.launch.args)}`;
       const result = await updateMarkedText(configPath, "codex-mcp", block);
       return { id: this.id, label: this.label, configPath, ...result };
     },
@@ -227,18 +245,18 @@ const adapters: Adapter[] = [
   },
   jsonAdapter({
     id: "claude", label: "Claude Code", binaries: ["claude"],
-    config: ({ homeDir }) => path.join(homeDir, ".claude.json"), keys: ["mcpServers", "agent-vault"], spec: stdioSpec,
+    config: ({ homeDir }) => path.join(homeDir, ".claude.json"), keys: ["mcpServers", CONFIG_NAMESPACE], legacyKeys: ["mcpServers", LEGACY_CONFIG_NAMESPACE], spec: stdioSpec,
     skills: ({ homeDir }) => [path.join(homeDir, ".claude", "skills")]
   }),
   jsonAdapter({
     id: "cursor", label: "Cursor", binaries: ["cursor"],
-    config: ({ homeDir }) => path.join(homeDir, ".cursor", "mcp.json"), keys: ["mcpServers", "agent-vault"], spec: stdioSpec,
+    config: ({ homeDir }) => path.join(homeDir, ".cursor", "mcp.json"), keys: ["mcpServers", CONFIG_NAMESPACE], legacyKeys: ["mcpServers", LEGACY_CONFIG_NAMESPACE], spec: stdioSpec,
     skills: ({ homeDir }) => [path.join(homeDir, ".cursor", "skills")]
   }),
   jsonAdapter({
     id: "opencode", label: "OpenCode", binaries: ["opencode"],
     config: ({ homeDir, env, platform }) => platform === "win32" && env.APPDATA ? path.join(env.APPDATA, "opencode", "opencode.json") : path.join(homeDir, ".config", "opencode", "opencode.json"),
-    keys: ["mcp", "servers", "agent-vault"], spec: localSpec,
+    keys: ["mcp", "servers", CONFIG_NAMESPACE], legacyKeys: ["mcp", "servers", LEGACY_CONFIG_NAMESPACE], spec: localSpec,
     skills: ({ homeDir }) => [path.join(homeDir, ".agents", "skills")]
   }),
   {
@@ -256,13 +274,13 @@ const adapters: Adapter[] = [
       const configPath = this.configPath(context);
       if (!(await pathExists(configPath))) return { connected: false, current: false, launchCurrent: false };
       const text = await readFile(configPath, "utf8");
-      const connected = text.includes("# >>> agent-vault:deepseek-harness-mcp >>>");
+      const connected = [CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE].some((namespace) => text.includes(`# >>> ${namespace}:deepseek-harness-mcp >>>`));
       return { connected, current: connected && text.includes(JSON.stringify(context.vaultPath)), launchCurrent: connected && text.includes(JSON.stringify(context.vaultPath)) && text.includes(JSON.stringify(context.launch.args[0])) };
     },
     async install(context) {
       const configPath = this.configPath(context);
       const args = context.launch.args.map((arg) => `          - ${JSON.stringify(arg)}`).join("\n");
-      const block = `- insert:\n    - id: agent-vault-mcp\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: agent-vault\n        transport: stdio\n        command: ${JSON.stringify(context.launch.command)}\n        args:\n${args}`;
+      const block = `- insert:\n    - id: memory-ferry-mcp\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: memory-ferry\n        transport: stdio\n        command: ${JSON.stringify(context.launch.command)}\n        args:\n${args}`;
       const result = await updateDshPatch(configPath, block);
       return { id: this.id, label: this.label, configPath, ...result, note: "Requires the official @deepseek-ai/dsh-mcp-client Cordis plugin supported by DSH." };
     },
@@ -274,12 +292,12 @@ const adapters: Adapter[] = [
   },
   jsonAdapter({
     id: "gemini", label: "Gemini CLI", binaries: ["gemini"],
-    config: ({ homeDir }) => path.join(homeDir, ".gemini", "settings.json"), keys: ["mcpServers", "agent-vault"], spec: stdioSpec,
+    config: ({ homeDir }) => path.join(homeDir, ".gemini", "settings.json"), keys: ["mcpServers", CONFIG_NAMESPACE], legacyKeys: ["mcpServers", LEGACY_CONFIG_NAMESPACE], spec: stdioSpec,
     skills: ({ homeDir }) => [path.join(homeDir, ".gemini", "skills")]
   }),
   jsonAdapter({
     id: "copilot", label: "GitHub Copilot CLI", binaries: ["copilot"],
-    config: ({ homeDir }) => path.join(homeDir, ".copilot", "mcp-config.json"), keys: ["mcpServers", "agent-vault"], spec: stdioSpec,
+    config: ({ homeDir }) => path.join(homeDir, ".copilot", "mcp-config.json"), keys: ["mcpServers", CONFIG_NAMESPACE], legacyKeys: ["mcpServers", LEGACY_CONFIG_NAMESPACE], spec: stdioSpec,
     skills: ({ homeDir }) => [path.join(homeDir, ".copilot", "skills")]
   }),
   {
@@ -290,20 +308,28 @@ const adapters: Adapter[] = [
       const evidence: string[] = [];
       if (await executableOnPath("mcode", context.env, context.platform)) evidence.push("binary:mcode");
       if (await pathExists(this.configPath(context))) evidence.push(`config:${this.configPath(context)}`);
+      const legacyConfig = path.join(minimaxPluginRoot(context, LEGACY_CONFIG_NAMESPACE), "mcp.json");
+      if (await pathExists(legacyConfig)) evidence.push(`config:${legacyConfig}`);
       return { detected: evidence.length > 0, evidence };
     },
     async connection(context) {
-      const configPath = this.configPath(context);
+      let configPath = this.configPath(context);
+      if (!(await pathExists(configPath))) {
+        const legacyConfig = path.join(minimaxPluginRoot(context, LEGACY_CONFIG_NAMESPACE), "mcp.json");
+        if (await pathExists(legacyConfig)) configPath = legacyConfig;
+      }
       if (!(await pathExists(configPath))) return { connected: false, current: false, launchCurrent: false };
       try {
         const value = await readJson<Record<string, unknown>>(configPath);
-        const configured = getNested(value, ["mcpServers", "agent-vault"]);
+        const currentConfigured = getNested(value, ["mcpServers", CONFIG_NAMESPACE]);
+        const legacyConfigured = getNested(value, ["mcpServers", LEGACY_CONFIG_NAMESPACE]);
+        const configured = currentConfigured ?? legacyConfigured;
         const launch = minimaxLaunch(context);
         const launcherCurrent = await pathExists(launch.file) && await readFile(launch.file, "utf8") === launch.content;
         return {
           connected: configured !== undefined,
           current: configured !== undefined && containsString(configured, context.vaultPath),
-          launchCurrent: launcherCurrent && JSON.stringify(configured) === JSON.stringify(launch.spec)
+          launchCurrent: currentConfigured !== undefined && launcherCurrent && JSON.stringify(configured) === JSON.stringify(launch.spec)
         };
       } catch {
         return { connected: false, current: false, launchCurrent: false };
@@ -313,10 +339,10 @@ const adapters: Adapter[] = [
       const root = minimaxPluginRoot(context);
       const manifest = await updateJsonFile(path.join(root, "plugin.json"), (value) => {
         value.$schema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
-        value.name = "agent-vault";
-        value.version = '0.5.0'
-        value.description = "Shared local-first long-term memory and reusable Skills for MiniMax Code.";
-        value.author = { name: "Agent Vault Sync" };
+        value.name = CONFIG_NAMESPACE;
+        value.version = VERSION;
+        value.description = "Shared local-first long-term memory and reusable Skills for AI agents.";
+        value.author = { name: PRODUCT_NAME };
         value.license = "MIT";
         value.keywords = ["memory", "mcp", "skills", "local-first"];
       });
@@ -325,8 +351,16 @@ const adapters: Adapter[] = [
       const configPath = this.configPath(context);
       const config = await updateJsonFile(configPath, (value) => {
         value.$schema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
-        setNested(value, ["mcpServers", "agent-vault"], launch.spec);
+        deleteNested(value, ["mcpServers", LEGACY_CONFIG_NAMESPACE]);
+        setNested(value, ["mcpServers", CONFIG_NAMESPACE], launch.spec);
       });
+      const legacyRoot = minimaxPluginRoot(context, LEGACY_CONFIG_NAMESPACE);
+      if (legacyRoot !== root && await pathExists(path.join(legacyRoot, "plugin.json"))) {
+        try {
+          const legacyManifest = await readJson<Record<string, unknown>>(path.join(legacyRoot, "plugin.json"));
+          if (legacyManifest.name === LEGACY_CONFIG_NAMESPACE) await rm(legacyRoot, { recursive: true, force: true });
+        } catch { /* Preserve an unrecognized legacy directory. */ }
+      }
       return {
         id: this.id,
         label: this.label,
@@ -339,7 +373,10 @@ const adapters: Adapter[] = [
     async uninstall(context) {
       const configPath = this.configPath(context);
       if (!(await pathExists(configPath))) return { id: this.id, label: this.label, configPath, changed: false };
-      const result = await updateJsonFile(configPath, (value) => deleteNested(value, ["mcpServers", "agent-vault"]));
+      const result = await updateJsonFile(configPath, (value) => {
+        deleteNested(value, ["mcpServers", CONFIG_NAMESPACE]);
+        deleteNested(value, ["mcpServers", LEGACY_CONFIG_NAMESPACE]);
+      });
       return { id: this.id, label: this.label, configPath, ...result };
     }
   }
@@ -347,7 +384,7 @@ const adapters: Adapter[] = [
 
 export function adapterContext(vaultPath: string, cliPath: string, options: AdapterContextOptions = {}): AdapterContext {
   const env = options.env || process.env;
-  const packaged = options.selfContained ?? (env.AGENT_VAULT_EXE === "1" || isSea() || Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg));
+  const packaged = options.selfContained ?? (env.MEMORY_FERRY_EXE === "1" || env.AGENT_VAULT_EXE === "1" || isSea() || Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg));
   return {
     homeDir: options.homeDir || homedir(), env, platform: options.platform || process.platform,
     vaultPath: path.resolve(vaultPath), launch: { command: process.execPath, args: [...(packaged ? [] : [path.resolve(cliPath)]), "mcp", "--vault", path.resolve(vaultPath)] }

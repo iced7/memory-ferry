@@ -2,7 +2,7 @@
 
 ## Design goals
 
-Agent Vault Sync optimizes for the lowest operational cost: one install per machine, an ordinary synchronized directory, no hosted control plane, and no database daemon. It deliberately does not synchronize a live SQLite database because cloud-drive clients cannot safely merge database pages, WAL files, or locks.
+Memory Ferry · 记忆摆渡 optimizes for the lowest operational cost: one install per machine, an ordinary synchronized directory, no hosted control plane, and no database daemon. It deliberately does not synchronize a live SQLite database because cloud-drive clients cannot safely merge database pages, WAL files, or locks.
 
 ## Event model
 

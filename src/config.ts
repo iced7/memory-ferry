@@ -1,11 +1,12 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isoDate, pathExists, readJson, writeJsonAtomic } from "./utils.js";
+import { CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE } from "./brand.js";
 
 export async function backupFile(file: string): Promise<string | undefined> {
   if (!(await pathExists(file))) return undefined;
   const suffix = isoDate().replace(/[:.]/g, "-");
-  const backup = `${file}.agent-vault-backup-${suffix}`;
+  const backup = `${file}.memory-ferry-backup-${suffix}`;
   await copyFile(file, backup);
   return backup;
 }
@@ -25,12 +26,16 @@ export async function updateJsonFile(file: string, mutate: (value: Record<string
 }
 
 export async function updateMarkedText(file: string, marker: string, block?: string): Promise<{ changed: boolean; backup?: string }> {
-  const start = `# >>> agent-vault:${marker} >>>`;
-  const end = `# <<< agent-vault:${marker} <<<`;
   const old = (await pathExists(file)) ? await readFile(file, "utf8") : "";
-  const escapedStart = start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const without = old.replace(new RegExp(`(?:^|\\n)${escapedStart}[\\s\\S]*?${escapedEnd}(?:\\n|$)`, "g"), "\n").trimEnd();
+  let without = old;
+  for (const namespace of [CONFIG_NAMESPACE, LEGACY_CONFIG_NAMESPACE]) {
+    const start = `# >>> ${namespace}:${marker} >>>`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const end = `# <<< ${namespace}:${marker} <<<`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    without = without.replace(new RegExp(`(?:^|\\n)${start}[\\s\\S]*?${end}(?:\\n|$)`, "g"), "\n");
+  }
+  without = without.trimEnd();
+  const start = `# >>> ${CONFIG_NAMESPACE}:${marker} >>>`;
+  const end = `# <<< ${CONFIG_NAMESPACE}:${marker} <<<`;
   const next = block ? `${without}${without ? "\n\n" : ""}${start}\n${block.trim()}\n${end}\n` : `${without}${without ? "\n" : ""}`;
   if (next === old) return { changed: false };
   const backup = await backupFile(file);

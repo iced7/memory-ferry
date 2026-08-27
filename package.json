@@ -1,9 +1,10 @@
 {
-  "name": "agent-vault-sync",
-  "version": "0.5.0",
+  "name": "memory-ferry",
+  "version": "0.6.0-beta.1",
   "description": "Local-first, folder-synced long-term memory and reusable skills for AI agents.",
   "type": "module",
   "bin": {
+    "memory-ferry": "dist/cli.js",
     "agent-vault": "dist/cli.js"
   },
   "main": "dist/index.js",
@@ -15,11 +16,15 @@
     "assets",
     "docs",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "build:exe:win": "npm run build && node scripts/build-windows-exe.mjs",
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
@@ -36,6 +41,14 @@
     "skills",
     "local-first"
   ],
+  "homepage": "https://github.com/iced7/memory-ferry#readme",
+  "bugs": {
+    "url": "https://github.com/iced7/memory-ferry/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iced7/memory-ferry.git"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

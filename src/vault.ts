@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, SearchOptions, VaultManifest } from "./types.js";
@@ -22,6 +23,7 @@ import {
   upsertEmbedding,
   type Embedder,
 } from './embed.js'
+import { LEGACY_MANIFEST_FILE, LEGACY_MEMORY_SKILL_NAME, LEGACY_VAULT_FORMAT, MANIFEST_FILE, MEMORY_SKILL_NAME, PRODUCT_NAME, VAULT_FORMAT } from "./brand.js";
 
 const KINDS: MemoryKind[] = ["fact", "preference", "decision", "lesson", "note", "task"];
 const SCOPES = ["global", "project", "agent"] as const;
@@ -149,18 +151,24 @@ export class Vault {
     }
   }
 
-  get manifestPath(): string { return path.join(this.root, "agent-vault.json"); }
+  get currentManifestPath(): string { return path.join(this.root, MANIFEST_FILE); }
+  get legacyManifestPath(): string { return path.join(this.root, LEGACY_MANIFEST_FILE); }
+  get manifestPath(): string {
+    if (existsSync(this.currentManifestPath)) return this.currentManifestPath;
+    if (existsSync(this.legacyManifestPath)) return this.legacyManifestPath;
+    return this.currentManifestPath;
+  }
   get eventsPath(): string { return path.join(this.root, "memory", "events"); }
   get eventsCachePath(): string { return path.join(this.state.home, 'cache', `${stableId(this.root)}-events.json`); }
   get embeddingsPath(): string { return embeddingIndexPath(this.state.home, this.root) }
 
-  static async init(root: string, name = "Agent Vault", state = new StateStore(), embedding: VaultEmbeddingOptions = {}): Promise<Vault> {
+  static async init(root: string, name = PRODUCT_NAME, state = new StateStore(), embedding: VaultEmbeddingOptions = {}): Promise<Vault> {
     const vault = new Vault(root, state, embedding);
     await mkdir(vault.eventsPath, { recursive: true });
     await mkdir(path.join(vault.root, "skills"), { recursive: true });
     if (!(await pathExists(vault.manifestPath))) {
-      const manifest: VaultManifest = { schemaVersion: SCHEMA_VERSION, vaultId: randomUUID(), name, createdAt: isoDate(), format: "agent-vault-events" };
-      await writeJsonAtomic(vault.manifestPath, manifest);
+      const manifest: VaultManifest = { schemaVersion: SCHEMA_VERSION, vaultId: randomUUID(), name, createdAt: isoDate(), format: VAULT_FORMAT };
+      await writeJsonAtomic(vault.currentManifestPath, manifest);
     } else {
       await vault.manifest();
     }
@@ -171,9 +179,19 @@ export class Vault {
   }
 
   async manifest(): Promise<VaultManifest> {
-    if (!(await pathExists(this.manifestPath))) throw new Error(`Not an Agent Vault: ${this.root}`);
-    const value = await readJson<VaultManifest>(this.manifestPath);
-    if (value.schemaVersion !== SCHEMA_VERSION || value.format !== "agent-vault-events") throw new Error(`Unsupported vault format: ${this.root}`);
+    const manifestPath = this.manifestPath;
+    if (!(await pathExists(manifestPath))) throw new Error(`Not a Memory Ferry vault: ${this.root}`);
+    const value = await readJson<VaultManifest>(manifestPath);
+    if (value.schemaVersion !== SCHEMA_VERSION || ![VAULT_FORMAT, LEGACY_VAULT_FORMAT].includes(value.format)) throw new Error(`Unsupported vault format: ${this.root}`);
+    if (manifestPath === this.legacyManifestPath) {
+      const migrated = { ...value, format: VAULT_FORMAT } satisfies VaultManifest;
+      await writeJsonAtomic(this.currentManifestPath, migrated);
+      await ensureBuiltinSkill(this.root);
+      return migrated;
+    }
+    if (existsSync(path.join(this.root, "skills", LEGACY_MEMORY_SKILL_NAME)) && !existsSync(path.join(this.root, "skills", MEMORY_SKILL_NAME))) {
+      await ensureBuiltinSkill(this.root);
+    }
     return value;
   }
 
@@ -289,7 +307,7 @@ export class Vault {
 
   private queueEmbedding(record: MemoryRecord): void {
     const { embedder, env } = this.embedding
-    if (env.AGENT_VAULT_EMBED === 'off') return
+    if ((env.MEMORY_FERRY_EMBED || env.AGENT_VAULT_EMBED) === 'off') return
     const model = embeddingModel(env)
     const version = (this.embeddingVersions.get(record.id) || 0) + 1
     this.embeddingVersions.set(record.id, version)
@@ -316,27 +334,31 @@ export class Vault {
     const { embedder, env } = this.embedding
     const model = embeddingModel(env)
     const index = await loadEmbeddingIndex(this.embeddingsPath, model)
-    const refreshIndex = index.model === model ? index : emptyEmbeddingIndex(model)
-    const plan = planEmbeddingRefresh(allMemories, refreshIndex)
+    const initialIndex = index.model === model ? index : emptyEmbeddingIndex(model)
+    const plan = planEmbeddingRefresh(allMemories, initialIndex)
     if (index.model !== model) {
       plan.orphan = planEmbeddingRefresh(allMemories, index).orphan
     }
-    for (const memoryId of [...plan.orphan, ...plan.stale]) delete refreshIndex.vectors[memoryId]
-    void sweepEmbeddingRefresh({
+    const sweep = await sweepEmbeddingRefresh({
       file: this.embeddingsPath,
       model,
       memories: allMemories,
       plan,
       embedder,
       env,
-    }).catch(() => undefined)
+    }).catch(() => ({ index: initialIndex, available: false }))
+
+    const refreshIndex = sweep.index.model === model ? sweep.index : emptyEmbeddingIndex(model)
+    const refreshedPlan = planEmbeddingRefresh(allMemories, refreshIndex)
+    for (const memoryId of [...refreshedPlan.orphan, ...refreshedPlan.stale]) delete refreshIndex.vectors[memoryId]
 
     if (!Object.keys(refreshIndex.vectors).length) {
       return textResults.slice(0, limit)
     }
 
     try {
-      if (!(await embedder.available(env))) return textResults.slice(0, limit)
+      const available = sweep.available ?? await embedder.available(env)
+      if (!available) return textResults.slice(0, limit)
       const queryVector = await embedder.embed(query, model, env)
       const textScores = new Map(textResults.map((result) => [result.memory.id, result.score]))
       const weight = semanticWeight(env)

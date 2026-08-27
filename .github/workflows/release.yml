@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-release-version.mjs "${{ github.ref_name }}"
+      - run: npm run test:all
+      - run: npm run build:exe:win
+      - run: node scripts/smoke-windows-exe.mjs
+      - name: Create Windows archive
+        shell: pwsh
+        run: Compress-Archive -Path release\* -DestinationPath "MemoryFerry-${{ github.ref_name }}-windows-x64.zip"
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "MemoryFerry-${{ github.ref_name }}-windows-x64.zip" release/MemoryFerry.exe release/MemoryFerry.exe.sha256 --generate-notes --prerelease

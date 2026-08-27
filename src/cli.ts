@@ -10,38 +10,48 @@ import { adapterContext, detectAgents, installAgents, skillDestinations, uninsta
 import { runMcp } from "./mcp.js";
 import { runUi } from "./ui.js";
 import { migrateVault } from "./migration.js";
+import { CLI_NAME, PRODUCT_NAME, PRODUCT_NAME_ZH, VERSION } from "./brand.js";
 
-const VERSION = '0.5.0'
-const HELP = `Agent Vault Sync ${VERSION}
+const COMMANDS = `  ${CLI_NAME} init <folder> [--name <name>]
+  ${CLI_NAME} use <folder>
+  ${CLI_NAME} vaults list|remove <folder>
+  ${CLI_NAME} vault migrate <source-folder> <target-folder>
+  ${CLI_NAME} status [--json]
+  ${CLI_NAME} remember <text> [--title <title>] [--kind <kind>] [--scope <scope>] [--scope-id <id>] [--tag <tag> ...]
+  ${CLI_NAME} recall <query> [--limit <n>] [--no-semantic] [--json]
+  ${CLI_NAME} list|get|update|forget ...
+  ${CLI_NAME} context <query> [--limit <n>] [--no-semantic]
+  ${CLI_NAME} skills list|sync [all|agent ...]
+  ${CLI_NAME} agents detect|install|uninstall [all|agent ...]
+  ${CLI_NAME} ui [--port <n>] [--no-open]
+  ${CLI_NAME} mcp`;
+
+const HELP_EN = `${PRODUCT_NAME} ${VERSION}
 
 Local-first long-term memory shared through iCloud, OneDrive, NAS, or any synced folder.
 
 Usage:
-  agent-vault init <folder> [--name <name>]
-  agent-vault use <folder>
-  agent-vault vaults list
-  agent-vault vaults remove <folder>
-  agent-vault vault migrate <source-folder> <target-folder>
-  agent-vault status [--json]
-  agent-vault remember <text> [--title <title>] [--kind <kind>] [--scope <scope>] [--scope-id <id>] [--tag <tag> ...]
-  agent-vault recall <query> [--limit <n>] [--no-semantic] [--json]
-  agent-vault list [--limit <n>] [--json]
-  agent-vault get <memory-id> [--json]
-  agent-vault update <memory-id> [--content <text>] [--title <title>] [--tag <tag> ...]
-  agent-vault forget <memory-id>
-  agent-vault context <query> [--limit <n>] [--no-semantic]
-  agent-vault skills list
-  agent-vault skills sync [all|codex|claude|cursor|opencode|deepseek-harness|gemini|copilot|minimax-code]
-  agent-vault agents detect [--json]
-  agent-vault agents install [all|codex|claude|cursor|opencode|deepseek-harness|gemini|copilot|minimax-code ...]
-  agent-vault agents uninstall [all|codex|claude|cursor|opencode|deepseek-harness|gemini|copilot|minimax-code ...]
-  agent-vault ui [--port <n>] [--no-open]
-  agent-vault mcp
+${COMMANDS}
 
 Global options:
   --vault <folder>        Override the selected vault
+  --lang <en|zh-CN>       Help language
   --json                  Machine-readable output
   -h, --help              Show help
+`;
+
+const HELP_ZH = `${PRODUCT_NAME} · ${PRODUCT_NAME_ZH} ${VERSION}
+
+通过 iCloud、OneDrive、NAS 或任意同步文件夹，在跨设备、跨 AI Agent 场景中共享本地优先的长期记忆。
+
+用法：
+${COMMANDS}
+
+全局选项：
+  --vault <folder>        临时指定 Vault
+  --lang <en|zh-CN>       帮助语言
+  --json                  输出机器可读 JSON
+  -h, --help              显示帮助
 `;
 
 interface Parsed { positionals: string[]; flags: Map<string, string[]>; }
@@ -88,8 +98,10 @@ async function selectedVault(parsed: Parsed, state: StateStore): Promise<Vault> 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const parsed = parse(argv);
   const [command, subcommand, ...rest] = parsed.positionals;
+  const locale = flag(parsed, "lang") || process.env.MEMORY_FERRY_LANG || Intl.DateTimeFormat().resolvedOptions().locale;
+  const help = locale.toLowerCase().startsWith("zh") ? HELP_ZH : HELP_EN;
   if (parsed.flags.has("version")) { console.log(VERSION); return; }
-  if (!command || parsed.flags.has("help") || parsed.flags.has("h")) { console.log(HELP); return; }
+  if (!command || parsed.flags.has("help") || parsed.flags.has("h")) { console.log(help); return; }
   if (command === "version") { console.log(VERSION); return; }
   const state = new StateStore();
   const wantsJson = parsed.flags.has("json");
@@ -119,7 +131,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const folder = path.resolve(requireArg(rest[0], "vault folder"));
       await state.removeVault(folder); print({ removed: true, path: folder }, wantsJson); return;
     }
-    throw new Error("Use `agent-vault vaults list|remove <folder>`. ");
+    throw new Error(`Use \`${CLI_NAME} vaults list|remove <folder>\`.`);
   }
   if (command === "vault" && subcommand === "migrate") {
     print(await migrateVault(requireArg(rest[0], "source Vault folder"), requireArg(rest[1], "target Vault folder")), wantsJson); return;
@@ -168,7 +180,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       for (const destination of skillDestinations(context, ids)) results.push(...await syncSkills(vault.root, destination));
       print(results, wantsJson); return;
     }
-    throw new Error("Use `agent-vault skills list` or `agent-vault skills sync [agents...]`.");
+    throw new Error(`Use \`${CLI_NAME} skills list\` or \`${CLI_NAME} skills sync [agents...]\`.`);
   }
   if (command === "agents") {
     if (subcommand === "detect") { print(await detectAgents(context), wantsJson); return; }
@@ -180,9 +192,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       print({ installed, skills }, wantsJson); return;
     }
     if (subcommand === "uninstall") { print(await uninstallAgents(context, ids), wantsJson); return; }
-    throw new Error("Use `agent-vault agents detect|install|uninstall`.");
+    throw new Error(`Use \`${CLI_NAME} agents detect|install|uninstall\`.`);
   }
-  throw new Error(`Unknown command: ${command}. Run agent-vault --help.`);
+  throw new Error(`Unknown command: ${command}. Run ${CLI_NAME} --help.`);
 }
 
 function sameExecutable(left: string, right: string): boolean {
@@ -190,5 +202,5 @@ function sameExecutable(left: string, right: string): boolean {
   catch { return path.resolve(left) === path.resolve(right); }
 }
 
-const isMain = process.env.AGENT_VAULT_EXE !== "1" && process.argv[1] && sameExecutable(process.argv[1], fileURLToPath(import.meta.url));
-if (isMain) main().catch((error) => { console.error(`agent-vault: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 1; });
+const isMain = process.env.MEMORY_FERRY_EXE !== "1" && process.env.AGENT_VAULT_EXE !== "1" && process.argv[1] && sameExecutable(process.argv[1], fileURLToPath(import.meta.url));
+if (isMain) main().catch((error) => { console.error(`${CLI_NAME}: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 1; });

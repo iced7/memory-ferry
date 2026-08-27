@@ -16,24 +16,24 @@ test("installs and removes all agent configurations in an isolated home", async 
   assert.ok(installed.every((result) => result.changed));
 
   const codex = await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8");
-  assert.match(codex, /\[mcp_servers\.agent-vault\]/);
+  assert.match(codex, /\[mcp_servers\.memory-ferry\]/);
   const claude = JSON.parse(await readFile(path.join(homeDir, ".claude.json"), "utf8"));
-  assert.equal(claude.mcpServers["agent-vault"].command, process.execPath);
+  assert.equal(claude.mcpServers["memory-ferry"].command, process.execPath);
   const cursor = JSON.parse(await readFile(path.join(homeDir, ".cursor", "mcp.json"), "utf8"));
-  assert.ok(cursor.mcpServers["agent-vault"].args.includes("mcp"));
+  assert.ok(cursor.mcpServers["memory-ferry"].args.includes("mcp"));
   const opencode = JSON.parse(await readFile(path.join(homeDir, ".config", "opencode", "opencode.json"), "utf8"));
-  assert.equal(opencode.mcp.servers["agent-vault"].type, "local");
+  assert.equal(opencode.mcp.servers["memory-ferry"].type, "local");
   const dsh = await readFile(path.join(homeDir, ".dsh", "cordis.patch.yml"), "utf8");
   assert.match(dsh, /@deepseek-ai\/dsh-mcp-client/);
   const gemini = JSON.parse(await readFile(path.join(homeDir, ".gemini", "settings.json"), "utf8"));
-  assert.ok(gemini.mcpServers["agent-vault"]);
+  assert.ok(gemini.mcpServers["memory-ferry"]);
   const copilot = JSON.parse(await readFile(path.join(homeDir, ".copilot", "mcp-config.json"), "utf8"));
-  assert.ok(copilot.mcpServers["agent-vault"]);
-  const minimax = JSON.parse(await readFile(path.join(homeDir, ".minimax", "plugins", "agent-vault", "mcp.json"), "utf8"));
+  assert.ok(copilot.mcpServers["memory-ferry"]);
+  const minimax = JSON.parse(await readFile(path.join(homeDir, ".minimax", "plugins", "memory-ferry", "mcp.json"), "utf8"));
   assert.equal(minimax.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
-  assert.equal(minimax.mcpServers["agent-vault"].type, "stdio");
-  assert.equal(minimax.mcpServers["agent-vault"].command, "./agent-vault-mcp");
-  assert.match(await readFile(path.join(homeDir, ".minimax", "plugins", "agent-vault", "agent-vault-mcp"), "utf8"), /exec/);
+  assert.equal(minimax.mcpServers["memory-ferry"].type, "stdio");
+  assert.equal(minimax.mcpServers["memory-ferry"].command, "./memory-ferry-mcp");
+  assert.match(await readFile(path.join(homeDir, ".minimax", "plugins", "memory-ferry", "memory-ferry-mcp"), "utf8"), /exec/);
 
   const detection = await detectAgents(context);
   assert.ok(detection.every((agent) => agent.detected));
@@ -43,7 +43,7 @@ test("installs and removes all agent configurations in an isolated home", async 
   assert.ok(detection.every((agent) => agent.current));
   const removed = await uninstallAgents(context, ["all"]);
   assert.ok(removed.every((result) => result.changed));
-  assert.doesNotMatch(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), /mcp_servers\.agent-vault/);
+  assert.doesNotMatch(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), /mcp_servers\.(?:agent-vault|memory-ferry)/);
   assert.equal(await readFile(path.join(homeDir, ".dsh", "cordis.patch.yml"), "utf8"), "[]\n");
   assert.ok((await detectAgents(context)).every((agent) => !agent.connected));
   const deepseek = (await detectAgents(context)).find((agent) => agent.id === "deepseek-harness");
@@ -53,7 +53,7 @@ test("installs and removes all agent configurations in an isolated home", async 
 
   await installAgents(context, ["deepseek-harness"]);
   const reinstalledDsh = await readFile(path.join(homeDir, ".dsh", "cordis.patch.yml"), "utf8");
-  assert.match(reinstalledDsh, /^# >>> agent-vault:deepseek-harness-mcp >>>\n- insert:/);
+  assert.match(reinstalledDsh, /^# >>> memory-ferry:deepseek-harness-mcp >>>\n- insert:/);
   assert.doesNotMatch(reinstalledDsh, /^\[\]/);
 });
 
@@ -86,9 +86,9 @@ test("recognizes the current Vault in Windows JSON paths", async () => {
   await installAgents(context, ["cursor", "gemini", "copilot", "opencode", "minimax-code"]);
   const selected = (await detectAgents(context)).filter((agent) => ["cursor", "gemini", "copilot", "opencode", "minimax-code"].includes(agent.id));
   assert.ok(selected.every((agent) => agent.connected && agent.current && agent.launchCurrent));
-  const minimax = JSON.parse(await readFile(path.join(context.homeDir, ".minimax", "plugins", "agent-vault", "mcp.json"), "utf8"));
-  assert.equal(minimax.mcpServers["agent-vault"].command, "./agent-vault-mcp.cmd");
-  assert.match(await readFile(path.join(context.homeDir, ".minimax", "plugins", "agent-vault", "agent-vault-mcp.cmd"), "utf8"), /node\.exe/);
+  const minimax = JSON.parse(await readFile(path.join(context.homeDir, ".minimax", "plugins", "memory-ferry", "mcp.json"), "utf8"));
+  assert.equal(minimax.mcpServers["memory-ferry"].command, "./memory-ferry-mcp.cmd");
+  assert.match(await readFile(path.join(context.homeDir, ".minimax", "plugins", "memory-ferry", "memory-ferry-mcp.cmd"), "utf8"), /node\.exe/);
 });
 
 test("uses the executable itself as the MCP command in self-contained builds", () => {
@@ -98,6 +98,26 @@ test("uses the executable itself as the MCP command in self-contained builds", (
   assert.equal(context.launch.command, process.execPath);
   assert.deepEqual(context.launch.args.slice(0, 2), ["mcp", "--vault"]);
   assert.ok(!context.launch.args.includes("C:\\snapshot\\cli.js"));
+});
+
+test("reconnect migrates legacy managed agent configuration to Memory Ferry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "memory-ferry-legacy-adapter-"));
+  const homeDir = path.join(root, "home");
+  await mkdir(homeDir, { recursive: true });
+  await writeFile(path.join(homeDir, ".claude.json"), `${JSON.stringify({ mcpServers: { "agent-vault": { command: "old", args: [] } } })}\n`, "utf8");
+  await mkdir(path.join(homeDir, ".codex"), { recursive: true });
+  await writeFile(path.join(homeDir, ".codex", "config.toml"), "# >>> agent-vault:codex-mcp >>>\n[mcp_servers.agent-vault]\ncommand = \"old\"\nargs = []\n# <<< agent-vault:codex-mcp <<<\n", "utf8");
+  const context = adapterContext(path.join(root, "vault"), path.join(root, "cli.js"), { homeDir, env: testEnv({ PATH: "" }), platform: "darwin" });
+  const before = await detectAgents(context);
+  assert.equal(before.find((agent) => agent.id === "claude")?.connected, true);
+  assert.equal(before.find((agent) => agent.id === "claude")?.launchCurrent, false);
+  await installAgents(context, ["claude", "codex"]);
+  const claude = JSON.parse(await readFile(path.join(homeDir, ".claude.json"), "utf8"));
+  assert.equal(claude.mcpServers["agent-vault"], undefined);
+  assert.equal(claude.mcpServers["memory-ferry"].command, process.execPath);
+  const codex = await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8");
+  assert.doesNotMatch(codex, /agent-vault:codex-mcp|mcp_servers\.agent-vault/);
+  assert.match(codex, /memory-ferry:codex-mcp|mcp_servers\.memory-ferry/);
 });
 
 test("uses the supplied scrubbed environment for packaged-mode detection", async (t) => {

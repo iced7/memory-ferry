@@ -1,25 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import { LEGACY_STATE_DIRECTORY, STATE_DIRECTORY } from "./brand.js";
 import type { HybridLogicalClock, LocalState } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { pathExists, readJson, stableId, writeJsonAtomic } from "./utils.js";
 
 export function stateHome(env = process.env, homeDir = homedir()): string {
-  return path.resolve(env.AGENT_VAULT_HOME || path.join(homeDir, ".agent-vault-sync"));
+  return path.resolve(env.MEMORY_FERRY_HOME || env.AGENT_VAULT_HOME || path.join(homeDir, STATE_DIRECTORY));
 }
 
 export class StateStore {
   readonly home: string;
   readonly file: string;
+  private readonly legacyFile?: string;
 
-  constructor(home = stateHome()) {
-    this.home = path.resolve(home);
+  constructor(home?: string, legacyHome?: string) {
+    this.home = path.resolve(home || stateHome());
     this.file = path.join(this.home, "state.json");
+    if (legacyHome) {
+      this.legacyFile = path.join(path.resolve(legacyHome), "state.json");
+    } else if (home === undefined && !process.env.MEMORY_FERRY_HOME && !process.env.AGENT_VAULT_HOME) {
+      this.legacyFile = path.join(homedir(), LEGACY_STATE_DIRECTORY, "state.json");
+    }
   }
 
   async load(): Promise<LocalState> {
     if (!(await pathExists(this.file))) {
+      if (this.legacyFile && await pathExists(this.legacyFile)) {
+        const legacy = await readJson<LocalState>(this.legacyFile);
+        if (legacy.schemaVersion === SCHEMA_VERSION && legacy.devices) {
+          await this.save(legacy);
+          return legacy;
+        }
+      }
       return { schemaVersion: SCHEMA_VERSION, devices: {} };
     }
     const state = await readJson<LocalState>(this.file);
@@ -62,9 +76,9 @@ export class StateStore {
   }
 
   async resolveVault(explicit?: string, env = process.env): Promise<string> {
-    const candidate = explicit || env.AGENT_VAULT_PATH || (await this.load()).defaultVault;
+    const candidate = explicit || env.MEMORY_FERRY_PATH || env.AGENT_VAULT_PATH || (await this.load()).defaultVault;
     if (!candidate) {
-      throw new Error("No vault selected. Run `agent-vault init <synced-folder>` or pass --vault.");
+      throw new Error("No vault selected. Run `memory-ferry init <synced-folder>` or pass --vault.");
     }
     return path.resolve(candidate);
   }

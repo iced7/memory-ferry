@@ -18,8 +18,8 @@ test('recall and context accept --no-semantic', async () => {
   await vault.remember({ content: 'alpha command memory' })
   const env = {
     ...testEnv(),
-    AGENT_VAULT_HOME: stateHome,
-    AGENT_VAULT_EMBED: 'off',
+    MEMORY_FERRY_HOME: stateHome,
+    MEMORY_FERRY_EMBED: 'off',
   }
   const base = ['--import', 'tsx', 'src/cli.ts']
 
@@ -27,4 +27,14 @@ test('recall and context accept --no-semantic', async () => {
   assert.match(recall.stdout, /alpha command memory/)
   const context = await execFileAsync(process.execPath, [...base, 'context', 'alpha', '--no-semantic', '--vault', vault.root], { env })
   assert.match(context.stdout, /alpha command memory/)
+})
+
+test('shows English and Chinese help for the Memory Ferry CLI', async () => {
+  const base = ['--import', 'tsx', 'src/cli.ts', '--help']
+  const english = await execFileAsync(process.execPath, [...base, '--lang', 'en'], { env: testEnv() })
+  assert.match(english.stdout, /Memory Ferry 0\.6\.0-beta\.1/)
+  assert.match(english.stdout, /Cross-device|Local-first/)
+  const chinese = await execFileAsync(process.execPath, [...base, '--lang', 'zh-CN'], { env: testEnv() })
+  assert.match(chinese.stdout, /Memory Ferry · 记忆摆渡/)
+  assert.match(chinese.stdout, /跨设备/)
 })

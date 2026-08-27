@@ -11,23 +11,23 @@ test("creates and hash-syncs the reusable memory skill", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-vault-skills-"));
   const vault = await Vault.init(path.join(root, "vault"), "Test", new StateStore(path.join(root, "state")));
   const destination = path.join(root, "agent-home", "skills");
-  assert.deepEqual((await listSkills(vault.root)).map((skill) => skill.name), ["agent-vault-memory"]);
+  assert.deepEqual((await listSkills(vault.root)).map((skill) => skill.name), ["memory-ferry-memory"]);
   const first = await syncSkills(vault.root, destination);
   assert.equal(first[0].changed, true);
-  assert.match(await readFile(path.join(destination, "agent-vault-memory", "SKILL.md"), "utf8"), /memory_recall/);
-  const marker = JSON.parse(await readFile(path.join(destination, "agent-vault-memory", ".agent-vault-sync.json"), "utf8"));
-  assert.equal(marker.skill, "agent-vault-memory");
+  assert.match(await readFile(path.join(destination, "memory-ferry-memory", "SKILL.md"), "utf8"), /memory_recall/);
+  const marker = JSON.parse(await readFile(path.join(destination, "memory-ferry-memory", ".memory-ferry-sync.json"), "utf8"));
+  assert.equal(marker.skill, "memory-ferry-memory");
   assert.equal(marker.vault, vault.root);
   assert.match(marker.hash, /^[a-f0-9]{64}$/);
   assert.equal((await syncSkills(vault.root, destination))[0].changed, false);
-  const markerPath = path.join(destination, "agent-vault-memory", ".agent-vault-sync.json");
-  await writeFile(markerPath, `${JSON.stringify({ skill: "agent-vault-memory", vault: "stale", hash: "stale" })}\n`, "utf8");
+  const markerPath = path.join(destination, "memory-ferry-memory", ".memory-ferry-sync.json");
+  await writeFile(markerPath, `${JSON.stringify({ skill: "memory-ferry-memory", vault: "stale", hash: "stale" })}\n`, "utf8");
   assert.equal((await syncSkills(vault.root, destination))[0].changed, false);
   assert.deepEqual(JSON.parse(await readFile(markerPath, "utf8")), marker);
 
-  await writeFile(path.join(vault.root, "skills", "agent-vault-memory", "notes.txt"), "new shared content\n");
+  await writeFile(path.join(vault.root, "skills", "memory-ferry-memory", "notes.txt"), "new shared content\n");
   assert.equal((await syncSkills(vault.root, destination))[0].changed, true);
-  assert.equal(await readFile(path.join(destination, "agent-vault-memory", "notes.txt"), "utf8"), "new shared content\n");
+  assert.equal(await readFile(path.join(destination, "memory-ferry-memory", "notes.txt"), "utf8"), "new shared content\n");
 });
 
 test("prunes stale owned skills without deleting user-owned directories", async () => {
@@ -71,7 +71,7 @@ test("adopts pre-marker copies that match vault content (upgrade path) and still
   const first = await syncSkills(vault.root, destination);
   const adopted = first.find((entry) => entry.name === "legacy-skill");
   assert.equal(adopted?.changed, false);
-  const marker = JSON.parse(await readFile(path.join(legacy, ".agent-vault-sync.json"), "utf8"));
+  const marker = JSON.parse(await readFile(path.join(legacy, ".memory-ferry-sync.json"), "utf8"));
   assert.equal(marker.skill, "legacy-skill");
   assert.equal(marker.vault, vault.root);
 

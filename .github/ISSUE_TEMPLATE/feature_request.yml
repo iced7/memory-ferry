@@ -1,0 +1,18 @@
+name: Feature request / 功能建议
+description: Propose an improvement / 提议改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 问题
+      description: What workflow is difficult today? / 当前哪个使用场景有困难？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed result / 期望结果
+    validations:
+      required: true

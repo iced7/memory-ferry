@@ -7,6 +7,7 @@ import {
   embeddingIndexPath,
   loadEmbeddingIndex,
   planEmbeddingRefresh,
+  sweepEmbeddingRefresh,
   type Embedder,
   type EmbeddingIndex,
   writeEmbeddingIndex,
@@ -146,9 +147,7 @@ test('persists embedding indexes and ignores corrupt files during search', async
   const results = await new Vault(vault.root, state, {
     env: { AGENT_VAULT_EMBED_MODEL: MODEL },
     embedder: {
-      available: async () => {
-        throw new Error('availability should not be checked for an empty index')
-      },
+      available: async () => false,
       embed: async () => [1, 0],
     },
   }).search('alpha')
@@ -253,7 +252,7 @@ test('plans valid, stale, missing, and orphan embedding entries', () => {
   })
 })
 
-test('search backfills a memory that arrives from another device', async () => {
+test('the first search backfills and recalls a memory that arrives from another device', async () => {
   const { root, state, vault } = await fixture()
   const remoteVault = await Vault.init(vault.root, 'Remote Device', new StateStore(path.join(root, 'remote-state')), unavailableEmbedding)
   const remote = await remoteVault.remember({ content: 'conceptual neighbor from sync' })
@@ -266,11 +265,10 @@ test('search backfills a memory that arrives from another device', async () => {
     embedder,
   })
 
-  assert.deepEqual(await searchVault.search('alpha'), [])
-  await waitFor(async () => Boolean((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[remote.id]))
   const results = await searchVault.search('alpha')
 
   assert.equal(results[0].memory.id, remote.id)
+  assert.ok((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[remote.id])
 })
 
 test('search excludes a remotely-stale vector and re-embeds the update', async () => {
@@ -378,4 +376,48 @@ test('search backfills at most 25 missing embeddings per sweep', async () => {
   await searchVault.search('query')
   await waitFor(async () => Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length === 50)
   assert.equal(recordEmbeddings, 50)
+})
+
+test('deduplicates concurrent refresh sweeps for the same local index', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'agent-vault-embedding-sweep-'))
+  const file = path.join(root, 'index.json')
+  const memories = [
+    memory('first', '2026-01-01T00:00:00.000Z'),
+    memory('second', '2026-01-02T00:00:00.000Z'),
+  ]
+  const plan = planEmbeddingRefresh(memories, { model: MODEL, vectors: {} })
+  let availableCalls = 0
+  let embeddingCalls = 0
+  let releaseEmbedding: (() => void) | undefined
+  let markEmbeddingStarted: (() => void) | undefined
+  const embeddingBlocked = new Promise<void>((resolve) => {
+    releaseEmbedding = resolve
+  })
+  const embeddingStarted = new Promise<void>((resolve) => {
+    markEmbeddingStarted = resolve
+  })
+  const embedder: Embedder = {
+    available: async () => {
+      availableCalls += 1
+      return true
+    },
+    embed: async () => {
+      embeddingCalls += 1
+      markEmbeddingStarted?.()
+      await embeddingBlocked
+      return [1, 0]
+    },
+  }
+  const options = { file, model: MODEL, memories, plan, embedder, env: {} }
+
+  const first = sweepEmbeddingRefresh(options)
+  await embeddingStarted
+  const second = sweepEmbeddingRefresh(options)
+  releaseEmbedding?.()
+  const [firstResult, secondResult] = await Promise.all([first, second])
+
+  assert.equal(availableCalls, 1)
+  assert.equal(embeddingCalls, 2)
+  assert.deepEqual(firstResult.index, secondResult.index)
+  assert.equal(Object.keys((await loadEmbeddingIndex(file, MODEL)).vectors).length, 2)
 })

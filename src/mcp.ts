@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { MemoryKind, ScopeType } from "./types.js";
 import { Vault } from "./vault.js";
 import { listSkills } from "./skills.js";
+import { MCP_SERVER_NAME, VERSION } from "./brand.js";
 
 const kind = z.enum(["fact", "preference", "decision", "lesson", "note", "task"]);
 const scope = z.enum(["global", "project", "agent"]);
@@ -21,7 +22,7 @@ function failure(error: unknown) {
 }
 
 export function createMcpServer(vault: Vault): McpServer {
-  const server = new McpServer({ name: 'agent-vault-sync', version: '0.5.0' })
+  const server = new McpServer({ name: MCP_SERVER_NAME, version: VERSION });
 
   server.registerTool("memory_remember", {
     description: "Save a durable fact, preference, decision, lesson, note, or task to shared long-term memory.",

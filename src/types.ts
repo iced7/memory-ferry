@@ -37,7 +37,7 @@ export interface VaultManifest {
   vaultId: string;
   name: string;
   createdAt: string;
-  format: "agent-vault-events";
+  format: "memory-ferry-events" | "agent-vault-events";
 }
 
 export interface LocalState {

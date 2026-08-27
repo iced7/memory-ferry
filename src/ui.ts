@@ -13,10 +13,26 @@ import { StateStore } from "./state.js";
 import { listSkills, syncSkills } from "./skills.js";
 import { expandPath, pathExists } from "./utils.js";
 import { Vault } from "./vault.js";
+import { LEGACY_MANIFEST_FILE, MANIFEST_FILE, PRODUCT_NAME, VERSION } from "./brand.js";
 
 const execFileAsync = promisify(execFile);
 const UI_FILE = fileURLToPath(new URL("../assets/ui.html", import.meta.url));
 let embeddedUiTemplate: string | undefined;
+
+export const SKILL_SYNC_INTERVAL_MS = 5 * 60_000;
+export const WINDOWS_FOLDER_PICKER_SCRIPT = [
+  "Add-Type -AssemblyName System.Windows.Forms",
+  "$owner=New-Object System.Windows.Forms.Form",
+  "$owner.TopMost=$true",
+  "$owner.ShowInTaskbar=$false",
+  "$owner.Opacity=0.01",
+  "$owner.Width=1",
+  "$owner.Height=1",
+  "$owner.StartPosition='CenterScreen'",
+  "$d=New-Object System.Windows.Forms.FolderBrowserDialog",
+  "$d.Description='选择 Memory Ferry Vault 文件夹 / Choose a Memory Ferry Vault folder'",
+  "try{$owner.Show();$owner.Activate();if($d.ShowDialog($owner)-eq [System.Windows.Forms.DialogResult]::OK){[Console]::Write($d.SelectedPath)}}finally{$d.Dispose();$owner.Dispose()}",
+].join(";");
 
 export function setEmbeddedUiTemplate(template: string): void {
   embeddedUiTemplate = template;
@@ -72,15 +88,14 @@ function providerFor(folder: string, platform: NodeJS.Platform): { id: string; l
 
 async function chooseFolder(platform: NodeJS.Platform): Promise<string | undefined> {
   if (platform === "darwin") {
-    const { stdout } = await execFileAsync("osascript", ["-e", "POSIX path of (choose folder with prompt \"选择 Agent Vault 文件夹\")"]);
+    const { stdout } = await execFileAsync("osascript", ["-e", "POSIX path of (choose folder with prompt \"选择 Memory Ferry Vault 文件夹 / Choose a Vault folder\")"]);
     return stdout.trim().replace(/\/$/, "") || undefined;
   }
   if (platform === "win32") {
-    const script = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='选择 Agent Vault 文件夹'; if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){[Console]::Write($d.SelectedPath)}";
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { windowsHide: true });
+    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-STA", "-Command", WINDOWS_FOLDER_PICKER_SCRIPT], { windowsHide: true });
     return stdout.trim() || undefined;
   }
-  const { stdout } = await execFileAsync("zenity", ["--file-selection", "--directory", "--title=选择 Agent Vault 文件夹"]);
+  const { stdout } = await execFileAsync("zenity", ["--file-selection", "--directory", "--title=Memory Ferry · 选择 Vault 文件夹"]);
   return stdout.trim() || undefined;
 }
 
@@ -127,7 +142,7 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   }
   const context = adapterContext(vaultPath || process.cwd(), options.cliPath, { homeDir: options.homeDir, env: options.env, platform: options.platform });
   const agents = await detectAgents(context);
-  return { version: '0.5.0', vault, vaults, vaultPath: vaultPath || null, vaultError, agents, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform }
+  return { version: VERSION, vault, vaults, vaultPath: vaultPath || null, vaultError, agents, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform };
 }
 
 async function connectedAgentIds(vaultPath: string, options: Required<Pick<UiOptions, "cliPath" | "homeDir" | "env" | "platform">>): Promise<AgentId[]> {
@@ -161,8 +176,10 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
   const token = randomBytes(24).toString("base64url");
   const nonce = randomBytes(16).toString("base64url");
   const template = embeddedUiTemplate ?? await readFile(UI_FILE, "utf8");
-  const page = template.replaceAll("__AGENT_VAULT_TOKEN__", token).replaceAll("__CSP_NONCE__", nonce);
+  const page = template.replaceAll("__MEMORY_FERRY_TOKEN__", token).replaceAll("__AGENT_VAULT_TOKEN__", token).replaceAll("__CSP_NONCE__", nonce);
   let origin = "";
+  let autoSync: NodeJS.Timeout | undefined;
+  let closePromise: Promise<void> | undefined;
 
   const server = createServer(async (request, response) => {
     try {
@@ -178,12 +195,18 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
       if (request.method === "GET" && requestUrl.pathname === "/favicon.ico") { response.writeHead(204); response.end(); return; }
       if (request.method === "GET" && requestUrl.pathname === "/api/health") { json(response, 200, { ok: true }); return; }
       if (!requestUrl.pathname.startsWith("/api/")) { json(response, 404, { error: "Not found" }); return; }
-      if (request.headers["x-agent-vault-token"] !== token) { json(response, 403, { error: "Invalid local UI token." }); return; }
+      if (request.headers["x-memory-ferry-token"] !== token && request.headers["x-agent-vault-token"] !== token) { json(response, 403, { error: "Invalid local UI token." }); return; }
       const suppliedOrigin = request.headers.origin;
       if (suppliedOrigin && suppliedOrigin !== origin) { json(response, 403, { error: "Invalid origin." }); return; }
 
       const shared = { state, cliPath: options.cliPath, homeDir, env, platform };
       if (request.method === "GET" && requestUrl.pathname === "/api/status") { json(response, 200, await dashboardStatus(shared)); return; }
+      if (request.method === "POST" && requestUrl.pathname === "/api/shutdown") {
+        json(response, 200, { ok: true });
+        const timer = setTimeout(() => { void close(); }, 75);
+        timer.unref();
+        return;
+      }
       if (request.method === "POST" && requestUrl.pathname === "/api/pick-folder") {
         try { json(response, 200, { path: await chooseFolder(platform) }); }
         catch (error) { json(response, 200, { path: null, cancelled: true, detail: error instanceof Error ? error.message : String(error) }); }
@@ -195,14 +218,14 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
         const selected = expandPath(input.path.trim(), homeDir);
         const previous = (await state.load()).defaultVault || selected;
         const ids = await connectedAgentIds(previous, shared);
-        const manifest = path.join(selected, "agent-vault.json");
-        if (await pathExists(manifest)) {
+        const hasManifest = await pathExists(path.join(selected, MANIFEST_FILE)) || await pathExists(path.join(selected, LEGACY_MANIFEST_FILE));
+        if (hasManifest) {
           await applyActiveVault(selected, ids, shared);
         } else if (input.create === true) {
           await Vault.init(selected, typeof input.name === "string" && input.name.trim() ? input.name.trim() : path.basename(selected), state);
           await applyActiveVault(selected, ids, shared);
         } else {
-          throw new Error("This folder is not an Agent Vault. Enable ‘create’ to initialize it.");
+          throw new Error("This folder is not a Memory Ferry Vault. Enable ‘create’ to initialize it.");
         }
         json(response, 200, { ok: true, path: selected }); return;
       }
@@ -264,6 +287,16 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
     }
   });
 
+  function close(): Promise<void> {
+    if (closePromise) return closePromise;
+    if (autoSync) clearInterval(autoSync);
+    closePromise = new Promise<void>((resolve, reject) => {
+      if (!server.listening) { resolve(); return; }
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    return closePromise;
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => { server.off("error", reject); resolve(); });
@@ -272,7 +305,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
   const actualPort = typeof address === "object" && address ? address.port : port;
   origin = `http://${host === "::1" ? `[${host}]` : host}:${actualPort}`;
   let autoSyncRunning = false;
-  const autoSync = setInterval(async () => {
+  autoSync = setInterval(async () => {
     if (autoSyncRunning) return;
     autoSyncRunning = true;
     try {
@@ -287,17 +320,24 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
     } finally {
       autoSyncRunning = false;
     }
-  }, 15_000);
+  }, SKILL_SYNC_INTERVAL_MS);
   autoSync.unref();
   if (options.open !== false) openBrowser(origin, platform);
-  return { server, url: origin, token, close: () => new Promise<void>((resolve, reject) => {
-    clearInterval(autoSync);
-    server.close((error) => error ? reject(error) : resolve());
-  }) };
+  return { server, url: origin, token, close };
 }
 
 export async function runUi(options: UiOptions): Promise<void> {
-  const handle = await startUiServer(options);
-  console.log(`Agent Vault UI: ${handle.url}`);
-  console.log("Press Ctrl+C to stop the local dashboard.");
+  try {
+    const handle = await startUiServer(options);
+    console.log(`${PRODUCT_NAME} UI: ${handle.url}`);
+    console.log(`Use the dashboard's exit button to stop ${PRODUCT_NAME}.`);
+  } catch (error) {
+    if (options.open !== false && (error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      const host = options.host || "127.0.0.1";
+      const port = options.port ?? 47831;
+      openBrowser(`http://${host === "::1" ? `[${host}]` : host}:${port}`, options.platform || process.platform);
+      return;
+    }
+    throw error;
+  }
 }
