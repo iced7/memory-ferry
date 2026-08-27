@@ -33,15 +33,20 @@
 Requires Node.js 20 or newer:
 
 ```bash
-npm install
-npm run build
-npm link
+npm install -g memory-ferry@beta
 
 memory-ferry init "/path/to/your/synced/MemoryFerryVault"
 memory-ferry agents install all
 memory-ferry remember "Prefer concise answers" --kind preference --scope global
 memory-ferry recall "answer style"
 memory-ferry ui
+```
+
+During the beta period, use the explicit `@beta` tag. Upgrade or uninstall with:
+
+```bash
+npm install -g memory-ferry@beta
+npm uninstall -g memory-ferry
 ```
 
 The dashboard is loopback-only, opens in your browser, supports English and Chinese, manages multiple Vaults, connects or disconnects agents, migrates Vault contents safely, and reconciles Skills every five minutes while running.

@@ -21,12 +21,20 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install
-npm run build
-npm link
+npm install -g memory-ferry@beta
+memory-ferry ui
 ```
 
-`npm link` 后会得到全局命令 `memory-ferry`。开发时也可以使用 `node dist/cli.js`。
+当前为 Beta 版，请明确使用 `@beta` 标签。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
+
+升级或卸载：
+
+```bash
+npm install -g memory-ferry@beta
+npm uninstall -g memory-ferry
+```
+
+如果只想在 Windows 上双击运行、不想安装 Node.js，请使用下方的单文件 EXE。
 
 ### Windows 单文件 EXE
 
