@@ -75,7 +75,8 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   assert.equal(multiStatus.autoManage, true);
   const switchedCodex = multiStatus.agents.find((agent: any) => agent.id === "codex");
   assert.equal(switchedCodex.current, true);
-  assert.match(await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8"), new RegExp(secondVault.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const codexConfig = await readFile(path.join(homeDir, ".codex", "config.toml"), "utf8");
+  assert.ok(codexConfig.includes(secondVault.replaceAll("\\", "\\\\")));
 
   const migrated = await api("/api/vault/migrate", { method: "POST", body: JSON.stringify({ source: vaultPath, target: secondVault }) });
   assert.equal(migrated.response.status, 200);

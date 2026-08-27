@@ -6,6 +6,23 @@ import type { HybridLogicalClock, LocalState } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { pathExists, readJson, stableId, writeJsonAtomic } from "./utils.js";
 
+const stateLocks = new Map<string, Promise<void>>();
+
+async function withStateLock<T>(file: string, action: () => Promise<T>): Promise<T> {
+  const previous = stateLocks.get(file) || Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const queued = previous.then(() => gate);
+  stateLocks.set(file, queued);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (stateLocks.get(file) === queued) stateLocks.delete(file);
+  }
+}
+
 export function stateHome(env = process.env, homeDir = homedir()): string {
   return path.resolve(env.MEMORY_FERRY_HOME || env.AGENT_VAULT_HOME || path.join(homeDir, STATE_DIRECTORY));
 }
@@ -30,7 +47,7 @@ export class StateStore {
       if (this.legacyFile && await pathExists(this.legacyFile)) {
         const legacy = await readJson<LocalState>(this.legacyFile);
         if (legacy.schemaVersion === SCHEMA_VERSION && legacy.devices) {
-          await this.save(legacy);
+          await writeJsonAtomic(this.file, legacy);
           return legacy;
         }
       }
@@ -44,35 +61,43 @@ export class StateStore {
   }
 
   async save(state: LocalState): Promise<void> {
-    await writeJsonAtomic(this.file, state);
+    await withStateLock(this.file, () => writeJsonAtomic(this.file, state));
   }
 
   async setDefaultVault(vaultPath: string): Promise<void> {
-    const state = await this.load();
-    const resolved = path.resolve(vaultPath);
-    state.defaultVault = resolved;
-    state.vaults = [...new Set([...(state.vaults || []), resolved])];
-    await this.save(state);
+    await withStateLock(this.file, async () => {
+      const state = await this.load();
+      const resolved = path.resolve(vaultPath);
+      state.defaultVault = resolved;
+      state.vaults = [...new Set([...(state.vaults || []), resolved])];
+      await writeJsonAtomic(this.file, state);
+    });
   }
 
   async clearDefaultVault(): Promise<void> {
-    const state = await this.load();
-    delete state.defaultVault;
-    await this.save(state);
+    await withStateLock(this.file, async () => {
+      const state = await this.load();
+      delete state.defaultVault;
+      await writeJsonAtomic(this.file, state);
+    });
   }
 
   async removeVault(vaultPath: string): Promise<void> {
-    const state = await this.load();
-    const resolved = path.resolve(vaultPath);
-    state.vaults = (state.vaults || []).filter((candidate) => path.resolve(candidate) !== resolved);
-    if (state.defaultVault && path.resolve(state.defaultVault) === resolved) delete state.defaultVault;
-    await this.save(state);
+    await withStateLock(this.file, async () => {
+      const state = await this.load();
+      const resolved = path.resolve(vaultPath);
+      state.vaults = (state.vaults || []).filter((candidate) => path.resolve(candidate) !== resolved);
+      if (state.defaultVault && path.resolve(state.defaultVault) === resolved) delete state.defaultVault;
+      await writeJsonAtomic(this.file, state);
+    });
   }
 
   async setAutoManage(enabled: boolean): Promise<void> {
-    const state = await this.load();
-    state.autoManage = enabled;
-    await this.save(state);
+    await withStateLock(this.file, async () => {
+      const state = await this.load();
+      state.autoManage = enabled;
+      await writeJsonAtomic(this.file, state);
+    });
   }
 
   async resolveVault(explicit?: string, env = process.env): Promise<string> {
@@ -84,26 +109,30 @@ export class StateStore {
   }
 
   async deviceFor(vaultPath: string): Promise<{ deviceId: string; lastClock?: HybridLogicalClock }> {
-    const state = await this.load();
-    const key = stableId(path.resolve(vaultPath), 24);
-    if (!state.devices[key]) {
-      state.devices[key] = { deviceId: randomUUID() };
-      await this.save(state);
-    }
-    return state.devices[key];
+    return withStateLock(this.file, async () => {
+      const state = await this.load();
+      const key = stableId(path.resolve(vaultPath), 24);
+      if (!state.devices[key]) {
+        state.devices[key] = { deviceId: randomUUID() };
+        await writeJsonAtomic(this.file, state);
+      }
+      return state.devices[key];
+    });
   }
 
   async nextClock(vaultPath: string, observed: HybridLogicalClock[] = []): Promise<HybridLogicalClock> {
-    const state = await this.load();
-    const key = stableId(path.resolve(vaultPath), 24);
-    const device = state.devices[key] || { deviceId: randomUUID() };
-    const now = Date.now();
-    const clocks = [device.lastClock, ...observed].filter(Boolean) as HybridLogicalClock[];
-    const maxWall = Math.max(now, ...clocks.map((clock) => clock.wallTime));
-    const maxCounter = Math.max(-1, ...clocks.filter((clock) => clock.wallTime === maxWall).map((clock) => clock.counter));
-    const next = { wallTime: maxWall, counter: maxWall === now && maxCounter < 0 ? 0 : maxCounter + 1, node: device.deviceId };
-    state.devices[key] = { deviceId: device.deviceId, lastClock: next };
-    await this.save(state);
-    return next;
+    return withStateLock(this.file, async () => {
+      const state = await this.load();
+      const key = stableId(path.resolve(vaultPath), 24);
+      const device = state.devices[key] || { deviceId: randomUUID() };
+      const now = Date.now();
+      const clocks = [device.lastClock, ...observed].filter(Boolean) as HybridLogicalClock[];
+      const maxWall = Math.max(now, ...clocks.map((clock) => clock.wallTime));
+      const maxCounter = Math.max(-1, ...clocks.filter((clock) => clock.wallTime === maxWall).map((clock) => clock.counter));
+      const next = { wallTime: maxWall, counter: maxWall === now && maxCounter < 0 ? 0 : maxCounter + 1, node: device.deviceId };
+      state.devices[key] = { deviceId: device.deviceId, lastClock: next };
+      await writeJsonAtomic(this.file, state);
+      return next;
+    });
   }
 }
