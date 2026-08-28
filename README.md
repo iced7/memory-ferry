@@ -4,7 +4,7 @@
 
 [中文说明](README.zh-CN.md) · [English user guide](docs/User-Guide.md) · [中文使用手册](docs/用户使用手册.md)
 
-> Version `0.6.0-beta.1` does not provide end-to-end encryption. Never store passwords, API keys, tokens, private keys, recovery codes, or other secrets.
+> Version `0.7.0-beta.1` does not provide end-to-end encryption. Never store passwords, API keys, tokens, private keys, recovery codes, or other secrets.
 
 ## Why it exists
 
@@ -12,7 +12,7 @@
 - Cross-agent: expose one MCP and CLI contract instead of locking memory to a model vendor.
 - Offline-friendly: each write is an independent immutable JSON event that syncs later.
 - Conflict-tolerant: concurrent additions never overwrite one another; updates converge deterministically.
-- Reusable Skills: copy a single Vault source to agent-specific Skill directories by content hash on macOS and Windows.
+- Reusable Skills: validate one portable source, render optional Agent overlays, and distribute target-specific packages by content hash on macOS and Windows.
 - Low cost: reuse storage and sync software you already operate.
 
 ## Supported agents
@@ -49,7 +49,18 @@ npm install -g memory-ferry@beta
 npm uninstall -g memory-ferry
 ```
 
-The dashboard is loopback-only, opens in your browser, supports English and Chinese, manages multiple Vaults, connects or disconnects agents, migrates Vault contents safely, and reconciles Skills every five minutes while running.
+The dashboard is loopback-only, opens in your browser, supports English and Chinese, manages multiple Vaults, connects or disconnects agents, reports Skill compatibility, migrates Vault contents safely, and reconciles Skills every five minutes while running.
+
+## Portable and Agent-adapted Skills
+
+Every Skill starts with one portable source at `<Vault>/skills/<skill-name>/SKILL.md`. Memory Ferry validates the open Agent Skills frontmatter before distribution. Run:
+
+```bash
+memory-ferry skills inspect
+memory-ferry skills sync all
+```
+
+For product-specific behavior, add an optional `memory-ferry.yaml` manifest and small `adapters/<agent>/` overlays. An overlay can merge `frontmatter.yaml`, append `APPEND.md`, and provide extra files such as Codex `agents/openai.yaml`; it may not replace the common `SKILL.md`. Memory Ferry renders and hashes each destination separately, groups Agents that share a discovery directory, blocks conflicting overlays, rejects non-portable symlinks, and preserves unrelated user-owned Skills. See the [Skill compatibility guide](docs/Skill-Compatibility.md).
 
 ## Windows portable app
 

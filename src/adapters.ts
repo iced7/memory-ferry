@@ -424,6 +424,23 @@ export async function uninstallAgents(context: AdapterContext, ids?: string[]): 
   return Promise.all(getAdapters(ids).map((adapter) => adapter.uninstall(context)));
 }
 
+export interface AgentSkillSyncTarget {
+  destination: string;
+  agentIds: AgentId[];
+}
+
+export function skillSyncTargets(context: AdapterContext, ids?: string[]): AgentSkillSyncTarget[] {
+  const grouped = new Map<string, AgentId[]>();
+  for (const adapter of getAdapters(ids)) {
+    for (const destination of adapter.skillDirs(context)) {
+      const agents = grouped.get(destination) || [];
+      if (!agents.includes(adapter.id)) agents.push(adapter.id);
+      grouped.set(destination, agents);
+    }
+  }
+  return [...grouped.entries()].map(([destination, agentIds]) => ({ destination, agentIds: agentIds.sort() }));
+}
+
 export function skillDestinations(context: AdapterContext, ids?: string[]): string[] {
-  return [...new Set(getAdapters(ids).flatMap((adapter) => adapter.skillDirs(context)))];
+  return skillSyncTargets(context, ids).map((target) => target.destination);
 }

@@ -7,10 +7,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { adapterContext, detectAgents, installAgents, skillDestinations, uninstallAgents, type AgentId } from "./adapters.js";
+import { adapterContext, detectAgents, installAgents, skillSyncTargets, uninstallAgents, type AgentId } from "./adapters.js";
 import { migrateVault } from "./migration.js";
 import { StateStore } from "./state.js";
-import { listSkills, syncSkills } from "./skills.js";
+import { inspectSkills, listSkills, syncSkills } from "./skills.js";
 import { expandPath, pathExists } from "./utils.js";
 import { Vault } from "./vault.js";
 import { LEGACY_MANIFEST_FILE, MANIFEST_FILE, PRODUCT_NAME, VERSION } from "./brand.js";
@@ -142,7 +142,8 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   }
   const context = adapterContext(vaultPath || process.cwd(), options.cliPath, { homeDir: options.homeDir, env: options.env, platform: options.platform });
   const agents = await detectAgents(context);
-  return { version: VERSION, vault, vaults, vaultPath: vaultPath || null, vaultError, agents, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform };
+  const skillCompatibility = vaultPath ? await inspectSkills(vaultPath, options.platform) : [];
+  return { version: VERSION, vault, vaults, vaultPath: vaultPath || null, vaultError, agents, skillCompatibility, autoManage: localState.autoManage !== false, statePath: options.state.file, platform: options.platform };
 }
 
 async function connectedAgentIds(vaultPath: string, options: Required<Pick<UiOptions, "cliPath" | "homeDir" | "env" | "platform">>): Promise<AgentId[]> {
@@ -157,7 +158,7 @@ async function applyActiveVault(vaultPath: string, ids: AgentId[], options: Requ
   if (!ids.length) return;
   const context = adapterContext(vaultPath, options.cliPath, { homeDir: options.homeDir, env: options.env, platform: options.platform });
   await installAgents(context, ids);
-  for (const destination of skillDestinations(context, ids)) await syncSkills(vaultPath, destination);
+  for (const target of skillSyncTargets(context, ids)) await syncSkills(vaultPath, target.destination, { agentIds: target.agentIds, platform: context.platform });
 }
 
 export async function startUiServer(options: UiOptions): Promise<UiHandle> {
@@ -267,7 +268,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
         if (agentMatch[2] === "connect") {
           const installed = await installAgents(context, [id]);
           const skills = [];
-          for (const destination of skillDestinations(context, [id])) skills.push(...await syncSkills(vaultPath, destination));
+          for (const target of skillSyncTargets(context, [id])) skills.push(...await syncSkills(vaultPath, target.destination, { agentIds: target.agentIds, platform: context.platform }));
           json(response, 200, { ok: true, installed, skills });
         } else {
           json(response, 200, { ok: true, removed: await uninstallAgents(context, [id]) });
@@ -278,7 +279,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
         const vaultPath = await state.resolveVault();
         const context = adapterContext(vaultPath, options.cliPath, { homeDir, env, platform });
         const results = [];
-        for (const destination of skillDestinations(context, ["all"])) results.push(...await syncSkills(vaultPath, destination));
+        for (const target of skillSyncTargets(context, ["all"])) results.push(...await syncSkills(vaultPath, target.destination, { agentIds: target.agentIds, platform: context.platform }));
         json(response, 200, { ok: true, results }); return;
       }
       json(response, 404, { error: "API route not found." });
@@ -314,7 +315,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
       const context = adapterContext(local.defaultVault, options.cliPath, { homeDir, env, platform });
       const ids = (await detectAgents(context)).filter((agent) => agent.connected && agent.current).map((agent) => agent.id as AgentId);
       if (!ids.length) return;
-      for (const destination of skillDestinations(context, ids)) await syncSkills(local.defaultVault, destination);
+      for (const target of skillSyncTargets(context, ids)) await syncSkills(local.defaultVault, target.destination, { agentIds: target.agentIds, platform: context.platform });
     } catch {
       // A temporarily unavailable cloud folder is retried on the next interval.
     } finally {

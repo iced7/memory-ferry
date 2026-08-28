@@ -2,7 +2,7 @@
 
 一个低成本、local-first 的跨 Agent 长期记忆与 Skill 复用工具。把 Vault 放在 iCloud Drive、OneDrive、Dropbox、Syncthing 或 NAS 同步目录中，Codex、Claude Code、Cursor、OpenCode、DeepSeek Harness、Gemini CLI、GitHub Copilot CLI 和 MiniMax Code 就能读写同一份记忆。
 
-当前版本：`0.6.0-beta.1`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
+当前版本：`0.7.0-beta.1`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
 
 [English README](README.md) · [English user guide](docs/User-Guide.md)
 
@@ -14,7 +14,7 @@
 - 跨 Agent：提供同一套 MCP 工具和 CLI，Agent 不绑定某一家模型。
 - 离线可写：每次操作写入独立、不可变的 JSON 事件；恢复联网后由网盘同步。
 - 冲突可合并：不同设备新增不会互相覆盖；同一记忆的并发修改用混合逻辑时钟确定性收敛。
-- Skill 复用：Vault 中的 `skills/` 是唯一来源，按内容哈希复制到各 Agent 的 Skill 目录，兼容 macOS 和 Windows。
+- Skill 复用：校验一份公共源文件，按需渲染 Agent 覆盖层，再按目标内容哈希分发，兼容 macOS 和 Windows。
 
 ## 安装
 
@@ -123,6 +123,7 @@ memory-ferry ui
 - 保存多个 Vault，并在 iCloud、OneDrive、NAS 等独立 Vault 之间切换。
 - 手动把源 Vault 的记忆事件和 Skill 安全合并到目标 Vault，不删除源数据或覆盖冲突。
 - 切换或接入时立即刷新 Agent 与共享 Skill，并在控制台运行时每 5 分钟进行一次兜底同步。
+- 显示每个 Skill 的公共规范校验、Agent 适配、不支持和阻止同步状态。
 
 控制台只监听 `127.0.0.1`，API 使用随机会话令牌，不会把管理界面暴露到局域网。使用指定端口或不自动打开浏览器：
 
@@ -197,7 +198,16 @@ description: Describe when an agent should use this skill.
 Put the reusable workflow here.
 ```
 
-运行 `memory-ferry skills sync all`。复制而不是符号链接是有意设计：Windows、OneDrive 和部分 NAS 对链接的支持并不一致。
+先检查兼容性，再执行分发：
+
+```bash
+memory-ferry skills inspect
+memory-ferry skills sync all
+```
+
+基础 Skill 使用开放 Agent Skills 公共格式。如果需要 Codex、Claude、Gemini、MiniMax 等专属能力，可以增加可选的 `memory-ferry.yaml` 和小型 `adapters/<agent>/` 覆盖层。覆盖层可以合并 `frontmatter.yaml`、追加 `APPEND.md`，或提供 Codex 的 `agents/openai.yaml` 等额外文件，但不能替换公共 `SKILL.md`。
+
+Memory Ferry 会按“渲染内容 + Agent 目标组合 + 操作系统 + 渲染器版本”分别计算哈希；共享同一发现目录的 Agent 会合并非冲突覆盖，冲突则停止该 Skill 的分发并在界面显示错误。复制而不是符号链接是有意设计：Windows、OneDrive 和部分 NAS 对链接的支持并不一致。完整格式参见[《Skill 兼容与适配手册》](docs/Skill-兼容与适配.md)。
 
 初始化时自动创建 `memory-ferry-memory` Skill，引导 Agent 在合适的时候召回和保存长期信息，并明确禁止保存凭据。
 
@@ -218,7 +228,7 @@ MemoryFerryVault/
 
 ## 安全边界
 
-- 0.6.0-beta.1 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
+- 0.7.0-beta.1 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
 - MCP/CLI 不会主动读取其他聊天记录；只处理明确写入 Vault 的内容。
 - 召回内容是上下文，不是高优先级指令；当前用户指令始终优先。
 - 建议对网盘开启多因素认证，并避免把 Vault 放进公开共享目录。

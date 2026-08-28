@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { adapterContext, detectAgents, installAgents, uninstallAgents, type AdapterContext } from "../src/adapters.js";
+import { adapterContext, detectAgents, installAgents, skillSyncTargets, uninstallAgents, type AdapterContext } from "../src/adapters.js";
 import { testEnv } from "./helpers.js";
 
 test("installs and removes all agent configurations in an isolated home", async () => {
@@ -11,6 +11,9 @@ test("installs and removes all agent configurations in an isolated home", async 
   const homeDir = path.join(root, "home");
   const env = testEnv({ PATH: "" });
   const context = adapterContext(path.join(root, "vault"), path.join(root, "dist", "cli.js"), { homeDir, env, platform: "darwin" });
+  const skillTargets = skillSyncTargets(context, ["codex", "opencode", "deepseek-harness"]);
+  assert.deepEqual(skillTargets.find((target) => target.destination === path.join(homeDir, ".agents", "skills"))?.agentIds, ["codex", "deepseek-harness", "opencode"]);
+  assert.equal(skillTargets.filter((target) => target.destination === path.join(homeDir, ".agents", "skills")).length, 1);
   const installed = await installAgents(context, ["all"]);
   assert.equal(installed.length, 8);
   assert.ok(installed.every((result) => result.changed));

@@ -1,6 +1,6 @@
 # Memory Ferry User Guide
 
-This guide applies to `0.6.0-beta.1`. For Chinese, see [用户使用手册](用户使用手册.md).
+This guide applies to `0.7.0-beta.1`. For Chinese, see [用户使用手册](用户使用手册.md).
 
 ## 1. What Memory Ferry does
 
@@ -28,7 +28,7 @@ Copy the release folder to a permanent location and double-click `MemoryFerry.ex
 ### Node.js installation on macOS, Windows, or Linux
 
 ```bash
-npm install -g memory-ferry
+npm install -g memory-ferry@beta
 memory-ferry --version
 ```
 
@@ -96,10 +96,11 @@ Put each Skill at `<Vault>/skills/<skill-name>/SKILL.md`, then run:
 
 ```bash
 memory-ferry skills list
+memory-ferry skills inspect
 memory-ferry skills sync all
 ```
 
-Memory Ferry copies by content hash instead of using symlinks, which is more reliable across Windows, cloud drives, and NAS mounts. It creates a built-in `memory-ferry-memory` Skill that teaches compatible agents when to recall or save durable context.
+Memory Ferry validates the open Agent Skills format, renders optional `memory-ferry.yaml` and `adapters/<agent>/` differences, and hashes each Agent/platform output separately. Conflicting overlays and invalid or non-portable sources are blocked instead of overwriting a working installation. It creates a built-in `memory-ferry-memory` Skill that teaches compatible agents when to recall or save durable context. See [Skill compatibility and Agent adapters](Skill-Compatibility.md).
 
 ## 8. Multiple Vaults and migration
 

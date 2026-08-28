@@ -30,6 +30,7 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   assert.match(pageHtml, /Memory Ferry · 记忆摆渡/);
   assert.match(pageHtml, /value="en">English/);
   assert.match(pageHtml, /自动同步 Agent 配置与 Skill/);
+  assert.match(pageHtml, /Skill 兼容性/);
   assert.doesNotMatch(pageHtml, /页面每 60 秒静默检查状态|Status is checked quietly|后台每 5 分钟补充检查|verify in the background/);
   assert.match(pageHtml, /id="add-vault-dialog"/);
   assert.match(pageHtml, /id="migrate-vault-dialog"/);
@@ -57,6 +58,9 @@ test("serves a token-protected dashboard and manages vault/agent connections", a
   assert.equal(status.vault.provider.id, "local");
   assert.equal(status.vault.writable, true);
   assert.equal(status.vaults.length, 1);
+  assert.equal(status.skillCompatibility.length, 1);
+  assert.equal(status.skillCompatibility[0].name, "memory-ferry-memory");
+  assert.equal(status.skillCompatibility[0].valid, true);
 
   const agentConnected = await api("/api/agents/codex/connect", { method: "POST" });
   assert.equal(agentConnected.response.status, 200);

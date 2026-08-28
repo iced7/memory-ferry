@@ -67,6 +67,12 @@
     .agent-name { font-weight:760; }
     .agent-detail { color:var(--muted); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:360px; }
     .agent-actions { display:flex; align-items:center; gap:7px; }
+    .skills-panel { grid-column:1/-1; }
+    .skill-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }
+    .skill-card { border:1px solid var(--line); border-radius:13px; padding:15px; min-width:0; }
+    .skill-title { display:flex; align-items:center; justify-content:space-between; gap:10px; font-weight:760; }
+    .skill-issue { margin-top:9px; color:var(--red); font-size:12px; }
+    .skill-requirement { margin-top:7px; color:var(--muted); font-size:12px; }
     .small { padding:6px 9px; font-size:12px; }
     .security { grid-column:1/-1; display:flex; align-items:flex-start; gap:12px; padding:15px 17px; border:1px solid #ecd9af; background:#fffaf0; border-radius:13px; color:#6b5321; }
     .security strong { display:block; color:#4b3a17; }
@@ -82,7 +88,7 @@
     .toast.show { transform:none; opacity:1; }
     .toast.error { background:#8a2e27; }
     .loading { opacity:.58; pointer-events:none; }
-    @media (max-width:800px) { .grid { grid-template-columns:1fr; } .agent-grid { grid-template-columns:1fr; } .stats { grid-template-columns:repeat(2,1fr); } header { align-items:flex-start; } .live { display:none; } }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr; } .agent-grid,.skill-grid { grid-template-columns:1fr; } .stats { grid-template-columns:repeat(2,1fr); } header { align-items:flex-start; } .live { display:none; } }
     @media (max-width:520px) { .shell { padding:20px 14px 40px; } h1 { font-size:19px; } header { flex-direction:column; } .toolbar { width:100%; justify-content:space-between; } .agent { grid-template-columns:auto 1fr; } .agent-actions { grid-column:1/-1; justify-content:flex-end; } .field-row { flex-direction:column; } .vault-row { grid-template-columns:1fr; } .vault-row-actions { justify-content:flex-end; } .sync-note { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
@@ -100,6 +106,7 @@
         <div class="sync-note"><span id="last-refreshed" data-zh="正在读取…" data-en="Loading…">正在读取…</span></div>
       </section>
       <section class="panel agents"><div class="panel-head"><h2 data-zh="Agent 接入" data-en="Agent connections">Agent 接入</h2><div><button class="button small" id="sync-skills" data-zh="同步全部 Skill" data-en="Sync all Skills">同步全部 Skill</button></div></div><div class="panel-body"><div class="agent-grid" id="agents"></div></div></section>
+      <section class="panel skills-panel"><div class="panel-head"><h2 data-zh="Skill 兼容性" data-en="Skill compatibility">Skill 兼容性</h2><span class="badge" data-zh="公共规范 + Agent 适配" data-en="Open standard + Agent adapters">公共规范 + Agent 适配</span></div><div class="panel-body"><div class="skill-grid" id="skills"></div></div></section>
       <div class="security"><div>⚠</div><div><strong data-zh="当前版本没有端到端加密" data-en="End-to-end encryption is not available yet">当前版本没有端到端加密</strong><span data-zh="Vault 使用普通 JSON 和 Markdown 文件。不要保存密码、API Key、Token、私钥或恢复码。" data-en="Vaults use plain JSON and Markdown files. Do not store passwords, API keys, tokens, private keys, or recovery codes.">Vault 使用普通 JSON 和 Markdown 文件。不要保存密码、API Key、Token、私钥或恢复码。</span></div></div>
     </div>
   </main>
@@ -145,7 +152,7 @@
       document.querySelectorAll('[data-zh]').forEach(node=>node.textContent=node.dataset[lang==='zh-CN'?'zh':'en']);
       document.querySelectorAll('[data-placeholder-zh]').forEach(node=>node.placeholder=node.dataset[lang==='zh-CN'?'placeholderZh':'placeholderEn']);
       document.querySelector('#language').value=lang;
-      if(snapshot){renderVault(snapshot);renderVaults(snapshot);renderAgents(snapshot);}
+      if(snapshot){renderVault(snapshot);renderVaults(snapshot);renderAgents(snapshot);renderSkills(snapshot);}
       if(lastRefreshedAt) renderLastRefreshed();
     }
     const icons = { codex:'CX', claude:'CL', cursor:'CU', opencode:'OC', 'deepseek-harness':'DS', gemini:'GE', copilot:'CP', 'minimax-code':'MM' };
@@ -189,7 +196,14 @@
       document.querySelectorAll('[data-connect]').forEach(button=>button.onclick=()=>act(()=>api(`/api/agents/${button.dataset.connect}/connect`,{method:'POST'}),tr('Agent 已接入；请重启或新建 Agent 会话','Agent connected; restart it or begin a new session')));
       document.querySelectorAll('[data-disconnect]').forEach(button=>button.onclick=async()=>{ if(!confirm(tr('这只会移除 Memory Ferry MCP 配置，不会删除 Vault 或记忆。继续吗？','This only removes the Memory Ferry MCP configuration; the Vault and memories remain. Continue?')))return; await act(()=>api(`/api/agents/${button.dataset.disconnect}/disconnect`,{method:'POST'}),tr('Agent 已断开','Agent disconnected')); });
     }
-    async function load({quiet=false,force=false}={}) { if(loading)return; loading=true; if(!quiet)app.classList.add('loading'); try { const next=await api('/api/status'); const changed=force||JSON.stringify(next)!==JSON.stringify(snapshot); snapshot=next; if(changed){renderVault(next);renderVaults(next);renderAgents(next);} lastRefreshedAt=new Date();renderLastRefreshed(); } catch(error){ if(!quiet)notify(error.message,true); } finally { loading=false; if(!quiet)app.classList.remove('loading'); } }
+    function renderSkills(data) {
+      const container=document.querySelector('#skills'),skills=data.skillCompatibility||[];
+      if(!data.vault){container.innerHTML=`<div class="path">${tr('连接 Vault 后显示 Skill 兼容性。','Connect a Vault to inspect Skill compatibility.')}</div>`;return;}
+      if(!skills.length){container.innerHTML=`<div class="path">${tr('当前 Vault 中没有可识别的 Skill。','No recognizable Skills are present in this Vault.')}</div>`;return;}
+      const labels={codex:'Codex',claude:'Claude',cursor:'Cursor',opencode:'OpenCode','deepseek-harness':'DeepSeek',gemini:'Gemini',copilot:'Copilot','minimax-code':'MiniMax'};
+      container.innerHTML=skills.map(skill=>{const entries=Object.entries(skill.agents||{}),adapted=entries.filter(([,mode])=>mode==='adapted').map(([id])=>labels[id]||id),unsupported=entries.filter(([,mode])=>mode==='unsupported').map(([id])=>labels[id]||id),warnings=(skill.issues||[]).filter(issue=>issue.level==='warning'),errors=(skill.issues||[]).filter(issue=>issue.level==='error'),commands=skill.requirements?.commands||[];return `<article class="skill-card"><div class="skill-title"><span>${esc(skill.name)}</span><span class="badge ${skill.valid?'ok':'off'}">${skill.valid?tr('规范有效','Valid'):tr('已阻止同步','Blocked')}</span></div><div class="badges"><span class="badge ok">${tr('公共格式','Portable core')}</span>${adapted.length?`<span class="badge">${tr('已适配：','Adapted: ')}${esc(adapted.join('、'))}</span>`:''}${unsupported.length?`<span class="badge warn">${tr('不支持：','Unsupported: ')}${esc(unsupported.join('、'))}</span>`:''}${warnings.length?`<span class="badge warn">${warnings.length} ${tr('项提醒','warnings')}</span>`:''}</div>${commands.length?`<div class="skill-requirement">${tr('需要命令：','Commands: ')}${esc(commands.join(', '))}</div>`:''}${skill.requirements?.network?`<div class="skill-requirement">${tr('需要网络访问','Requires network access')}</div>`:''}${errors.length?`<div class="skill-issue">${esc(errors.map(issue=>issue.message).join(' · '))}</div>`:''}</article>`;}).join('');
+    }
+    async function load({quiet=false,force=false}={}) { if(loading)return; loading=true; if(!quiet)app.classList.add('loading'); try { const next=await api('/api/status'); const changed=force||JSON.stringify(next)!==JSON.stringify(snapshot); snapshot=next; if(changed){renderVault(next);renderVaults(next);renderAgents(next);renderSkills(next);} lastRefreshedAt=new Date();renderLastRefreshed(); } catch(error){ if(!quiet)notify(error.message,true); } finally { loading=false; if(!quiet)app.classList.remove('loading'); } }
     async function act(operation,message) { app.classList.add('loading'); try { await operation(); notify(message); await load({quiet:true,force:true}); return true; } catch(error){ notify(error.message,true); return false; } finally { app.classList.remove('loading'); } }
     document.querySelector('#refresh').onclick=()=>load({force:true});
     document.querySelector('#language').onchange=event=>{lang=event.target.value;localStorage.setItem('memory-ferry-language',lang);applyLanguage();};

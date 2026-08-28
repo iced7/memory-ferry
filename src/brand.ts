@@ -1,4 +1,4 @@
-export const VERSION = "0.6.0-beta.1";
+export const VERSION = "0.7.0-beta.1";
 
 export const PRODUCT_NAME = "Memory Ferry";
 export const PRODUCT_NAME_ZH = "记忆摆渡";

@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { MemoryKind, ScopeType } from "./types.js";
 import { StateStore } from "./state.js";
 import { Vault } from "./vault.js";
-import { listSkills, syncSkills } from "./skills.js";
-import { adapterContext, detectAgents, installAgents, skillDestinations, uninstallAgents } from "./adapters.js";
+import { inspectSkills, listSkills, syncSkills } from "./skills.js";
+import { adapterContext, detectAgents, installAgents, skillSyncTargets, uninstallAgents } from "./adapters.js";
 import { runMcp } from "./mcp.js";
 import { runUi } from "./ui.js";
 import { migrateVault } from "./migration.js";
@@ -21,7 +21,7 @@ const COMMANDS = `  ${CLI_NAME} init <folder> [--name <name>]
   ${CLI_NAME} recall <query> [--limit <n>] [--no-semantic] [--json]
   ${CLI_NAME} list|get|update|forget ...
   ${CLI_NAME} context <query> [--limit <n>] [--no-semantic]
-  ${CLI_NAME} skills list|sync [all|agent ...]
+  ${CLI_NAME} skills list|inspect|sync [all|agent ...]
   ${CLI_NAME} agents detect|install|uninstall [all|agent ...]
   ${CLI_NAME} ui [--port <n>] [--no-open]
   ${CLI_NAME} mcp`;
@@ -174,13 +174,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const context = adapterContext(vault.root, cliPath);
   if (command === "skills") {
     if (subcommand === "list") { print(await listSkills(vault.root), wantsJson); return; }
+    if (subcommand === "inspect") { print(await inspectSkills(vault.root), wantsJson); return; }
     if (subcommand === "sync") {
       const ids = rest.length ? rest : ["all"];
       const results = [];
-      for (const destination of skillDestinations(context, ids)) results.push(...await syncSkills(vault.root, destination));
+      for (const target of skillSyncTargets(context, ids)) results.push(...await syncSkills(vault.root, target.destination, { agentIds: target.agentIds, platform: context.platform }));
       print(results, wantsJson); return;
     }
-    throw new Error(`Use \`${CLI_NAME} skills list\` or \`${CLI_NAME} skills sync [agents...]\`.`);
+    throw new Error(`Use \`${CLI_NAME} skills list|inspect\` or \`${CLI_NAME} skills sync [agents...]\`.`);
   }
   if (command === "agents") {
     if (subcommand === "detect") { print(await detectAgents(context), wantsJson); return; }
@@ -188,7 +189,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (subcommand === "install") {
       const installed = await installAgents(context, ids);
       const skills = [];
-      for (const destination of skillDestinations(context, ids)) skills.push(...await syncSkills(vault.root, destination));
+      for (const target of skillSyncTargets(context, ids)) skills.push(...await syncSkills(vault.root, target.destination, { agentIds: target.agentIds, platform: context.platform }));
       print({ installed, skills }, wantsJson); return;
     }
     if (subcommand === "uninstall") { print(await uninstallAgents(context, ids), wantsJson); return; }

@@ -36,7 +36,9 @@ Machine-local state:
 
 ## Integration boundary
 
-All agents receive the same stdio MCP server. Agent-specific adapters only manage configuration locations and Skill destinations. The core memory format has no dependency on MCP, a model vendor, or an Agent SDK, so CLI-only and future adapters can use the same Vault.
+All agents receive the same stdio MCP server. The core memory format has no dependency on MCP, a model vendor, or an Agent SDK, so CLI-only and future adapters can use the same Vault.
+
+Skills use a portable source plus a target renderer. `SKILL.md` follows the open Agent Skills subset; optional `memory-ferry.yaml` metadata and `adapters/<agent>/` overlays describe only product differences. Adapters provide configuration locations and Skill discovery directories. Destinations shared by multiple Agents are grouped before rendering, and conflicting overlay fields or files fail closed. The rendered hash includes output bytes, target Agent set, platform, and renderer version. Managed directories are replaced through a temporary sibling and recoverable rename swap; unrelated unowned directories are preserved.
 
 ## Current limitations
 

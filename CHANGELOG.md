@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0-beta.1 - 2026-08-28
+
+- Added open Agent Skills validation for required frontmatter, portable names, directory matching, platform constraints, and symbolic-link safety.
+- Added optional `memory-ferry.yaml` manifests with per-Agent enablement, overlays, command/network requirements, and macOS/Windows/Linux compatibility.
+- Added per-Agent rendering from one portable source, including `frontmatter.yaml`, `APPEND.md`, and extra adapter files such as Codex `agents/openai.yaml`.
+- Grouped Agents that share a Skill directory and reject conflicting overlays instead of silently producing an ambiguous package.
+- Changed synchronization hashes to include rendered content, the Agent target set, platform, and renderer version.
+- Replaced managed Skill directories through a temporary rendered directory and recoverable directory swap.
+- Added CLI inspection through `memory-ferry skills inspect` and a bilingual dashboard compatibility panel.
+
 ## 0.6.0-beta.1 - 2026-08-27
 
 - Renamed the product, npm package, CLI, manifest, local state, managed Agent configuration, built-in Skill, MiniMax plugin, and Windows executable to Memory Ferry.
