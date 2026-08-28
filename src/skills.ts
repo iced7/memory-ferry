@@ -327,6 +327,16 @@ async function overlayFiles(root: string): Promise<string[]> {
   return result;
 }
 
+async function copyPortableSource(sourceRoot: string, destinationRoot: string): Promise<void> {
+  for (const entry of (await readdir(sourceRoot, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.name === "adapters" || [SKILL_MANIFEST, SYNC_MARKER, LEGACY_SYNC_MARKER].includes(entry.name)) continue;
+    const source = path.join(sourceRoot, entry.name);
+    const destination = path.join(destinationRoot, entry.name);
+    if (entry.isDirectory()) await cp(source, destination, { recursive: true });
+    else if (entry.isFile()) await copyFile(source, destination);
+  }
+}
+
 function valueKey(value: unknown): string { return stringifyYaml(value, { lineWidth: 0 }); }
 
 async function renderSkill(skill: ParsedSkill, destination: string, target: SkillSyncTarget): Promise<RenderedSkill> {
@@ -343,15 +353,7 @@ async function renderSkill(skill: ParsedSkill, destination: string, target: Skil
 
   const tempPath = await mkdtemp(path.join(destination, `.${skill.name}.memory-ferry-`));
   try {
-    await cp(skill.path, tempPath, {
-      recursive: true,
-      filter: (source) => {
-        const relative = path.relative(skill.path, source);
-        if (!relative) return true;
-        const top = relative.split(path.sep)[0];
-        return top !== "adapters" && ![SKILL_MANIFEST, SYNC_MARKER, LEGACY_SYNC_MARKER].includes(relative);
-      }
-    });
+    await copyPortableSource(skill.path, tempPath);
 
     const frontmatter = { ...skill.frontmatter };
     let body = skill.body;
