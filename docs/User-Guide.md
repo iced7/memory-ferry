@@ -28,7 +28,7 @@ Copy the release folder to a permanent location and double-click `MemoryFerry.ex
 ### Node.js installation on macOS, Windows, or Linux
 
 ```bash
-npm install -g memory-ferry@1.0.0
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
 memory-ferry --version
 ```
 

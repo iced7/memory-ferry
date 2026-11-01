@@ -43,7 +43,7 @@ Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and lim
 Requires Node.js 20 or newer:
 
 ```bash
-npm install -g memory-ferry@1.0.0
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
 
 memory-ferry init "/path/to/your/synced/MemoryFerryVault"
 memory-ferry agents install all
@@ -52,10 +52,10 @@ memory-ferry recall "answer style"
 memory-ferry ui
 ```
 
-Install the pinned stable version. Upgrade or uninstall with:
+Install the pinned stable release tarball. npm registry publication is separate; this URL does not require npm login. Upgrade or uninstall with:
 
 ```bash
-npm install -g memory-ferry@1.0.0
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
 npm uninstall -g memory-ferry
 ```
 

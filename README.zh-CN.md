@@ -31,16 +31,16 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install -g memory-ferry@1.0.0
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
 memory-ferry ui
 ```
 
-使用固定版本号安装正式版。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
+通过 GitHub 固定版本安装正式版，无需 npm 登录；npm 仓库发布单独进行。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
 
 升级或卸载：
 
 ```bash
-npm install -g memory-ferry@1.0.0
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
 npm uninstall -g memory-ferry
 ```
 

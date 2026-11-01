@@ -3,7 +3,7 @@
 - [x] Run build and complete tests locally (67 passing); release commit must also pass CI.
 - [x] Run `npm audit` and `npm audit --omit=dev` on the exact lockfile.
 - [x] Inspect `npm pack --dry-run` and the resulting tarball for unintended files.
-- [ ] Smoke-test the installed tarball in an isolated prefix and Vault.
+- [x] Smoke-test the installed tarball in an isolated prefix and Vault.
 - [x] Verify Chinese/English memory management and history in a local browser using synthetic data.
 - [ ] Require CI on macOS, Windows, and Linux; Node 20, 22, and 24.
 - [ ] Build and smoke-test the standalone Windows EXE on Windows.
