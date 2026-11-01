@@ -115,3 +115,41 @@ test("uses a topmost Windows folder-picker owner and a low-frequency Skill fallb
   assert.match(WINDOWS_FOLDER_PICKER_SCRIPT, /ShowDialog\(\$owner\)/);
   assert.equal(SKILL_SYNC_INTERVAL_MS, 5 * 60_000);
 });
+
+test('memory manager enforces revision and Vault identity, supports history and restoration', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(),'memory-ferry-ui-memory-'));
+  const state = new StateStore(path.join(root,'state'));
+  const vault = await Vault.init(path.join(root,'vault'),'UI memories',state,unavailableEmbedding);
+  const handle = await startUiServer({state,cliPath:path.join(root,'cli.js'),homeDir:path.join(root,'home'),env:{MEMORY_FERRY_EMBED:'off'},port:0,open:false});
+  t.after(()=>handle.close());
+  async function api(route:string, data?:unknown, headers:Record<string,string>={}) {
+    const response = await fetch(handle.url+route,{method:data?'POST':'GET',headers:{'x-memory-ferry-token':handle.token,'content-type':'application/json',...headers},body:data?JSON.stringify(data):undefined});
+    return {status:response.status,value:await response.json() as any};
+  }
+  assert.equal((await api('/api/status',undefined, {origin:'https://untrusted.example'})).status,403);
+  const { request } = await import('node:http');
+  const rebinding = await new Promise<number|undefined>((resolve,reject)=>{
+    const req = request(handle.url,{headers:{host:'untrusted.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);req.end();
+  });
+  assert.equal(rebinding,403);
+  const identity={vaultId:(await vault.manifest()).vaultId,vaultPath:vault.root};
+  const created = await api('/api/memories',{...identity,content:'Initial <script>alert(1)</script>',scope:'project',scopeId:'sample'});
+  assert.equal(created.status,200);
+  const id = created.value.record.id;
+  const history = (await api('/api/memories/'+id)).value.history;
+  const first = history[0].eventId;
+  assert.equal((await api('/api/memories/'+id,{...identity,expectedRevision:first,content:'Edited'})).status,200);
+  assert.equal((await api('/api/memories/'+id,{...identity,expectedRevision:first,content:'Stale'})).status,409);
+  const second = (await vault.history(id))[0].eventId;
+  assert.equal((await api('/api/memories/'+id,{...identity,expectedRevision:second,vaultId:'wrong',content:'Wrong vault'})).status,409);
+  assert.equal((await api('/api/memories/'+id,{...identity,expectedRevision:second,vaultPath:'wrong',content:'Wrong folder'})).status,409);
+  assert.equal((await api('/api/memories/'+id+'/forget',{...identity,expectedRevision:second})).status,200);
+  assert.equal((await api('/api/memories')).value.items.length,0);
+  assert.equal((await api('/api/memories?deleted=true')).value.items.length,1);
+  const deleted = (await vault.history(id))[0].eventId;
+  assert.equal((await api('/api/memories/'+id+'/restore',{...identity,expectedRevision:deleted,eventId:first})).status,200);
+  assert.match((await vault.get(id))!.content,/Initial/);
+  assert.equal((await api('/api/status')).value.vault.health.sync,'unknown');
+  assert.equal((await api('/api/memories',{...identity,content:''})).status,400);
+  assert.equal((await api('/api/memories',{...identity,content:'x'.repeat(64_001)})).status,400);
+});

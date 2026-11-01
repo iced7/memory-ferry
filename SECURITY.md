@@ -15,7 +15,8 @@ Do not open a public issue for a vulnerability that could expose local files, ex
 ## Current security boundary / 当前安全边界
 
 - Memory Ferry has no end-to-end encryption yet. Never store passwords, tokens, private keys, recovery codes, or other secrets.
-- The dashboard listens only on the local loopback interface and uses a per-process token.
+- The dashboard listens only on the local loopback interface, checks Host and Origin, and uses a per-process token. Memory writes require the expected Vault identity and revision.
+- Deleting a memory retains historical plaintext. Neither tombstones nor local cache removal provide secure erasure.
 - Agent configuration updates are backed up before modification.
 - Cloud-drive and NAS security remains the responsibility of the selected sync provider and operating system.
 

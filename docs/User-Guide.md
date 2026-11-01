@@ -1,6 +1,6 @@
 # Memory Ferry User Guide
 
-This guide applies to `0.7.0-beta.1`. For Chinese, see [用户使用手册](用户使用手册.md).
+This guide applies to `1.0.0`. See [1.0 release notes](RELEASE-1.0.md) for memory management, doctor, history, restore, and project-aware recall. For Chinese, see [用户使用手册](用户使用手册.md).
 
 ## 1. What Memory Ferry does
 
@@ -28,7 +28,7 @@ Copy the release folder to a permanent location and double-click `MemoryFerry.ex
 ### Node.js installation on macOS, Windows, or Linux
 
 ```bash
-npm install -g memory-ferry@beta
+npm install -g memory-ferry@1.0.0
 memory-ferry --version
 ```
 
@@ -128,7 +128,7 @@ On computer A, create the Vault, add a test memory, and wait for the sync provid
 | `MEMORY_FERRY_SEMANTIC_WEIGHT` | Semantic score weight |
 | `OLLAMA_HOST` | Local Ollama endpoint |
 
-Legacy `AGENT_VAULT_*` names remain fallback aliases during the beta transition.
+Legacy `AGENT_VAULT_*` names remain fallback aliases for backward compatibility.
 
 ## 11. Security and backup
 

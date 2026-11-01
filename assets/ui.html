@@ -90,6 +90,21 @@
     .loading { opacity:.58; pointer-events:none; }
     @media (max-width:800px) { .grid { grid-template-columns:1fr; } .agent-grid,.skill-grid { grid-template-columns:1fr; } .stats { grid-template-columns:repeat(2,1fr); } header { align-items:flex-start; } .live { display:none; } }
     @media (max-width:520px) { .shell { padding:20px 14px 40px; } h1 { font-size:19px; } header { flex-direction:column; } .toolbar { width:100%; justify-content:space-between; } .agent { grid-template-columns:auto 1fr; } .agent-actions { grid-column:1/-1; justify-content:flex-end; } .field-row { flex-direction:column; } .vault-row { grid-template-columns:1fr; } .vault-row-actions { justify-content:flex-end; } .sync-note { align-items:flex-start; flex-direction:column; } }
+    .memory-panel { grid-column:1/-1; }
+    .memory-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+    .memory-controls .field { flex:1; min-width:160px; }
+    .memory-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:10px; }
+    .memory-card { text-align:left; padding:15px; border:1px solid var(--line); border-radius:12px; background:var(--panel,#fff); color:var(--ink); cursor:pointer; overflow:hidden; }
+    .memory-card:hover { border-color:var(--green,#527d61); }
+    .memory-preview { white-space:pre-wrap; overflow-wrap:anywhere; max-height:5em; overflow:hidden; margin:8px 0; font-size:13px; line-height:1.6; }
+    .memory-meta { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+    .memory-editor { display:grid; gap:12px; }
+    .memory-editor label { display:grid; gap:4px; font-size:13px; }
+    .memory-editor textarea { min-height:170px; resize:vertical; width:100%; font:inherit; }
+    .history-item { border-top:1px solid var(--line); padding:12px 0; }
+    .history-item pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; max-height:240px; overflow:auto; }
+    #memory-error { color:#8a2e27; white-space:pre-wrap; }
+    #memory-count { margin:10px 0; }
   </style>
 </head>
 <body>
@@ -105,6 +120,10 @@
         <label class="check"><input type="checkbox" id="auto-manage"> <span data-zh="自动同步 Agent 配置与 Skill" data-en="Automatically sync agent configuration and Skills">自动同步 Agent 配置与 Skill</span></label>
         <div class="sync-note"><span id="last-refreshed" data-zh="正在读取…" data-en="Loading…">正在读取…</span></div>
       </section>
+      <section class="panel memory-panel"><div class="panel-head"><h2 data-zh="记忆库" data-en="Memories">记忆库</h2><button class="button primary small" id="new-memory" data-zh="添加记忆" data-en="Add memory">添加记忆</button></div><div class="panel-body">
+        <form id="memory-search" class="memory-controls"><input class="field" id="memory-query" maxlength="4000" aria-label="Search memories" data-placeholder-zh="搜索记忆内容或标题" data-placeholder-en="Search content or titles" placeholder="搜索记忆内容或标题"><input class="field" id="memory-project" maxlength="300" aria-label="Project" data-placeholder-zh="项目 ID（空白为全部）" data-placeholder-en="Project ID (empty for all)" placeholder="项目 ID（空白为全部）"><label class="check"><input type="checkbox" id="show-deleted"><span data-zh="已删除" data-en="Deleted">已删除</span></label><button class="button" type="submit" data-zh="搜索" data-en="Search">搜索</button></form>
+        <div class="memory-meta" id="memory-count"></div><div class="memory-list" id="memory-list"></div>
+      </div></section>
       <section class="panel agents"><div class="panel-head"><h2 data-zh="Agent 接入" data-en="Agent connections">Agent 接入</h2><div><button class="button small" id="sync-skills" data-zh="同步全部 Skill" data-en="Sync all Skills">同步全部 Skill</button></div></div><div class="panel-body"><div class="agent-grid" id="agents"></div></div></section>
       <section class="panel skills-panel"><div class="panel-head"><h2 data-zh="Skill 兼容性" data-en="Skill compatibility">Skill 兼容性</h2><span class="badge" data-zh="公共规范 + Agent 适配" data-en="Open standard + Agent adapters">公共规范 + Agent 适配</span></div><div class="panel-body"><div class="skill-grid" id="skills"></div></div></section>
       <div class="security"><div>⚠</div><div><strong data-zh="当前版本没有端到端加密" data-en="End-to-end encryption is not available yet">当前版本没有端到端加密</strong><span data-zh="Vault 使用普通 JSON 和 Markdown 文件。不要保存密码、API Key、Token、私钥或恢复码。" data-en="Vaults use plain JSON and Markdown files. Do not store passwords, API keys, tokens, private keys, or recovery codes.">Vault 使用普通 JSON 和 Markdown 文件。不要保存密码、API Key、Token、私钥或恢复码。</span></div></div>
@@ -134,6 +153,17 @@
       </div>
     </form>
   </dialog>
+  <dialog class="modal" id="memory-dialog">
+    <div class="modal-head"><div><h2 data-zh="查看与编辑记忆" data-en="View and edit memory">查看与编辑记忆</h2><p id="memory-id"></p></div><button class="button modal-close" id="close-memory" aria-label="Close">×</button></div>
+    <div class="modal-body"><form id="memory-form" class="memory-editor">
+      <label><span data-zh="标题" data-en="Title">标题</span><input class="field" id="edit-title" maxlength="300"></label>
+      <label><span data-zh="内容" data-en="Content">内容</span><textarea class="field" id="edit-content" required maxlength="64000"></textarea></label>
+      <div class="field-row"><label><span data-zh="类型" data-en="Kind">类型</span><select class="field" id="edit-kind"><option value="note">note</option><option value="fact">fact</option><option value="preference">preference</option><option value="decision">decision</option><option value="lesson">lesson</option><option value="task">task</option></select></label><label><span data-zh="范围" data-en="Scope">范围</span><select class="field" id="edit-scope"><option value="global">global</option><option value="project">project</option><option value="agent">agent</option></select></label><label><span data-zh="范围 ID" data-en="Scope ID">范围 ID</span><input class="field" id="edit-scope-id" maxlength="300"></label></div>
+      <label><span data-zh="标签（逗号分隔）" data-en="Tags (comma separated)">标签（逗号分隔）</span><input class="field" id="edit-tags"></label>
+      <div id="memory-error" role="alert"></div>
+      <div class="modal-actions"><button class="button danger" type="button" id="forget-memory" data-zh="删除记忆" data-en="Delete memory">删除记忆</button><button class="button primary" type="submit" id="save-memory" data-zh="保存新版本" data-en="Save version">保存新版本</button></div>
+    </form><p class="notice" data-zh="删除只隐藏当前记忆；历史原文仍然保留，可从下方恢复。" data-en="Deleting hides the current memory; historical plaintext remains and can be restored below.">删除只隐藏当前记忆；历史原文仍然保留，可从下方恢复。</p><h3 data-zh="版本历史" data-en="Version history">版本历史</h3><div id="memory-history"></div></div>
+  </dialog>
   <div class="toast" id="toast"></div>
   <script nonce="__CSP_NONCE__">
     const token = "__MEMORY_FERRY_TOKEN__";
@@ -154,6 +184,7 @@
       document.querySelector('#language').value=lang;
       if(snapshot){renderVault(snapshot);renderVaults(snapshot);renderAgents(snapshot);renderSkills(snapshot);}
       if(lastRefreshedAt) renderLastRefreshed();
+      if(snapshot)loadMemories();
     }
     const icons = { codex:'CX', claude:'CL', cursor:'CU', opencode:'OC', 'deepseek-harness':'DS', gemini:'GE', copilot:'CP', 'minimax-code':'MM' };
     function providerText(provider) {
@@ -174,9 +205,10 @@
         content.innerHTML=`<div class="empty"><div class="empty-mark">☁</div><h3>${data.vaultError?tr('Vault 无法访问','Vault unavailable'):tr('尚未选择 Vault','No Vault selected')}</h3><p>${esc(data.vaultError||tr('点击“添加 Vault”选择同步目录，或初始化新的 Vault。','Choose “Add Vault” to select a synced folder or initialize a new Vault.'))}</p></div>`; return;
       }
       const v=data.vault, m=v.manifest;
-      badge.className=`badge ${v.writable?'ok':'off'}`; badge.textContent=v.writable?tr('已连接 · 可读写','Connected · writable'):tr('只读或不可访问','Read-only or unavailable');
+      badge.className=`badge ${v.health?.status==='warning'?'warn':v.writable?'ok':'off'}`; badge.textContent=v.health?.status==='warning'?tr('需要检查','Needs attention'):v.writable?tr('本机可读写','Locally writable'):tr('只读或不可访问','Read-only or unavailable');
       const provider=providerText(v.provider);
       content.innerHTML=`<div class="status-line"><div class="provider-icon">☁</div><div><div class="provider-title">${esc(provider.label)}</div><div class="path">${esc(v.path)}</div><div class="badges"><span class="badge ok">${tr('有效 Vault','Valid Vault')}</span><span class="badge ${v.writable?'ok':'off'}">${v.writable?tr('可读写','Writable'):tr('不可写','Not writable')}</span><span class="badge">${esc(provider.detail)}</span></div></div></div><div class="stats"><div class="stat"><strong>${v.memories}</strong><span>${tr('当前记忆','Memories')}</span></div><div class="stat"><strong>${v.events}</strong><span>${tr('同步事件','Sync events')}</span></div><div class="stat"><strong>${v.skills}</strong><span>${tr('共享 Skill','Shared Skills')}</span></div><div class="stat"><strong>v${data.version}</strong><span>${tr('工具版本','Version')}</span></div></div><div class="meta"><div><b>${tr('Vault 名称：','Vault name: ')}</b>${esc(m.name)}</div><div><b>Vault ID: </b>${esc(m.vaultId)}</div><div><b>${tr('最近事件：','Latest event: ')}</b>${esc(date(v.latestEventAt))}</div></div><div style="margin-top:16px"><button class="button danger small" id="disconnect-vault">${tr('断开本机 Vault','Disconnect local Vault')}</button></div>`;
+      content.insertAdjacentHTML('beforeend',`<div class="notice">${tr('云同步状态未知：请在网盘客户端确认其他设备已收齐文件。','Cloud sync status unknown: check your sync client to confirm files reached other devices.')}</div>${v.health?.issues?.length?`<details open><summary>${tr('Vault 检查提醒','Vault health warnings')} (${v.health.issues.length})</summary>${v.health.issues.map(i=>`<p class="memory-meta">${esc(i.code)} · ${esc(i.path)}<br>${esc(i.message)}</p>`).join('')}</details>`:''}`);
       document.querySelector('#disconnect-vault').onclick=async()=>{ if(!confirm(tr('仅取消本机默认 Vault；不会删除网盘文件，也不会移除 Agent 已有配置。继续吗？','This only clears the local default Vault. Cloud files and agent configuration are preserved. Continue?')))return; await act(()=>api('/api/vault/disconnect',{method:'POST'}),tr('已断开本机默认 Vault','Local Vault disconnected')); };
     }
     function renderVaults(data) {
@@ -203,8 +235,56 @@
       const labels={codex:'Codex',claude:'Claude',cursor:'Cursor',opencode:'OpenCode','deepseek-harness':'DeepSeek',gemini:'Gemini',copilot:'Copilot','minimax-code':'MiniMax'};
       container.innerHTML=skills.map(skill=>{const entries=Object.entries(skill.agents||{}),adapted=entries.filter(([,mode])=>mode==='adapted').map(([id])=>labels[id]||id),unsupported=entries.filter(([,mode])=>mode==='unsupported').map(([id])=>labels[id]||id),warnings=(skill.issues||[]).filter(issue=>issue.level==='warning'),errors=(skill.issues||[]).filter(issue=>issue.level==='error'),commands=skill.requirements?.commands||[];return `<article class="skill-card"><div class="skill-title"><span>${esc(skill.name)}</span><span class="badge ${skill.valid?'ok':'off'}">${skill.valid?tr('规范有效','Valid'):tr('已阻止同步','Blocked')}</span></div><div class="badges"><span class="badge ok">${tr('公共格式','Portable core')}</span>${adapted.length?`<span class="badge">${tr('已适配：','Adapted: ')}${esc(adapted.join('、'))}</span>`:''}${unsupported.length?`<span class="badge warn">${tr('不支持：','Unsupported: ')}${esc(unsupported.join('、'))}</span>`:''}${warnings.length?`<span class="badge warn">${warnings.length} ${tr('项提醒','warnings')}</span>`:''}</div>${commands.length?`<div class="skill-requirement">${tr('需要命令：','Commands: ')}${esc(commands.join(', '))}</div>`:''}${skill.requirements?.network?`<div class="skill-requirement">${tr('需要网络访问','Requires network access')}</div>`:''}${errors.length?`<div class="skill-issue">${esc(errors.map(issue=>issue.message).join(' · '))}</div>`:''}</article>`;}).join('');
     }
-    async function load({quiet=false,force=false}={}) { if(loading)return; loading=true; if(!quiet)app.classList.add('loading'); try { const next=await api('/api/status'); const changed=force||JSON.stringify(next)!==JSON.stringify(snapshot); snapshot=next; if(changed){renderVault(next);renderVaults(next);renderAgents(next);renderSkills(next);} lastRefreshedAt=new Date();renderLastRefreshed(); } catch(error){ if(!quiet)notify(error.message,true); } finally { loading=false; if(!quiet)app.classList.remove('loading'); } }
+    async function load({quiet=false,force=false}={}) { if(loading)return; loading=true; if(!quiet)app.classList.add('loading'); try { const next=await api('/api/status'); const changed=force||JSON.stringify(next)!==JSON.stringify(snapshot); snapshot=next; if(changed){renderVault(next);renderVaults(next);renderAgents(next);renderSkills(next);await loadMemories();} lastRefreshedAt=new Date();renderLastRefreshed(); } catch(error){ if(!quiet)notify(error.message,true); } finally { loading=false; if(!quiet)app.classList.remove('loading'); } }
     async function act(operation,message) { app.classList.add('loading'); try { await operation(); notify(message); await load({quiet:true,force:true}); return true; } catch(error){ notify(error.message,true); return false; } finally { app.classList.remove('loading'); } }
+    const memoryDialog=document.querySelector('#memory-dialog');
+    let editing=null, memoryRequest=0;
+    async function loadMemories(){
+      const sequence=++memoryRequest, list=document.querySelector('#memory-list'), count=document.querySelector('#memory-count');
+      document.querySelector('#new-memory').disabled=!snapshot?.vault;
+      if(!snapshot?.vault){list.textContent=tr('连接 Vault 后查看记忆。','Connect a Vault to view memories.');count.textContent='';return;}
+      const params=new URLSearchParams({query:document.querySelector('#memory-query').value,project:document.querySelector('#memory-project').value,deleted:String(document.querySelector('#show-deleted').checked)});
+      try{
+        const result=await api('/api/memories?'+params);
+        if(sequence!==memoryRequest)return;
+        count.textContent=tr(`显示 ${result.items.length} / ${result.total} 条 · ${result.duplicates.length} 组可能重复`,`Showing ${result.items.length} / ${result.total} · ${result.duplicates.length} possible duplicate groups`)+(result.warnings.length?tr(' · 部分事件无法读取',' · Some events could not be read'):'');
+        const duplicateIds=new Set(result.duplicates.flatMap(g=>g.ids));
+        list.innerHTML=result.items.map(({record:r,deleted})=>`<button class="memory-card" data-memory-id="${esc(r.id)}"><strong>${esc(r.title||tr('无标题','Untitled'))}</strong>${duplicateIds.has(r.id)?` <span class="badge warn">${tr('可能重复','Possible duplicate')}</span>`:''}<div class="memory-preview">${esc(r.content)}</div><div class="memory-meta">${esc(r.kind)} · ${esc(r.scope.type)}${r.scope.id?':'+esc(r.scope.id):''} · ${esc(date(r.updatedAt))}${deleted?' · '+tr('已删除','Deleted'):''}</div></button>`).join('')||`<p class="memory-meta">${tr('没有匹配的记忆。','No matching memories.')}</p>`;
+        list.querySelectorAll('[data-memory-id]').forEach(button=>button.onclick=()=>openMemory(button.dataset.memoryId));
+      }catch(error){if(sequence===memoryRequest){list.textContent=error.message;count.textContent='';}}
+    }
+    async function openMemory(id){
+      try{
+        const detail=id?await api('/api/memories/'+encodeURIComponent(id)):{vaultId:snapshot.vault.manifest.vaultId,vaultPath:snapshot.vault.path,history:[]};
+        editing={...detail,id,revision:detail.history[0]?.eventId};
+        const record=detail.history.find(e=>e.record)?.record||{content:'',title:'',kind:'note',scope:{type:'global'},tags:[]};
+        document.querySelector('#memory-id').textContent=id||tr('新记忆','New memory');
+        document.querySelector('#edit-title').value=record.title||'';document.querySelector('#edit-content').value=record.content;
+        document.querySelector('#edit-kind').value=record.kind;document.querySelector('#edit-scope').value=record.scope.type;document.querySelector('#edit-scope-id').value=record.scope.id||'';document.querySelector('#edit-tags').value=record.tags.join(', ');
+        document.querySelector('#memory-error').textContent=detail.warnings?.length?tr('有事件无法读取；请先处理 Vault 检查提醒。','Unreadable events: resolve Vault health warnings first.'):'';
+        const deleted=detail.history[0]?.op==='delete';document.querySelector('#save-memory').disabled=deleted;document.querySelector('#forget-memory').hidden=!id||deleted;
+        document.querySelector('#memory-history').innerHTML=detail.history.map(e=>`<div class="history-item"><div class="memory-meta">${esc(date(e.createdAt))} · ${esc(e.deviceId)} · ${e.op==='delete'?tr('删除','Deleted'):tr('保存','Saved')}${e.current?' · '+tr('当前版本','Current'):''}</div>${e.record?`<strong>${esc(e.record.title||'')}</strong><pre>${esc(e.record.content)}</pre>${e.record?`<button class="button small" data-restore="${esc(e.eventId)}">${tr('恢复此版本','Restore this version')}</button>`:''}`:''}</div>`).join('')||tr('保存后会开始记录历史。','History begins when you save.');
+        document.querySelectorAll('[data-restore]').forEach(button=>button.onclick=()=>restoreMemory(button.dataset.restore));
+        if(!memoryDialog.open)memoryDialog.showModal();
+      }catch(error){notify(error.message,true);}
+    }
+    async function mutateMemory(action, fields){
+      if(!editing)return;
+      const captured=editing;
+      const buttons=[...memoryDialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+      try{
+        await api('/api/memories'+(captured.id?'/'+encodeURIComponent(captured.id):'')+action,{method:'POST',body:JSON.stringify({...fields,vaultId:captured.vaultId,vaultPath:captured.vaultPath,expectedRevision:captured.revision})});
+        memoryDialog.close();notify(tr('记忆已更新','Memory updated'));await load({quiet:true,force:true});
+      }catch(error){document.querySelector('#memory-error').textContent=error.message;}
+      finally{buttons.forEach(b=>b.disabled=false);if(captured.history[0]?.op==='delete')document.querySelector('#save-memory').disabled=true;}
+    }
+    async function restoreMemory(eventId){if(confirm(tr('把这个历史版本恢复为当前记忆？现有历史会保留。','Restore this version as current? Existing history will be retained.')))await mutateMemory('/restore',{eventId});}
+    document.querySelector('#memory-search').onsubmit=event=>{event.preventDefault();loadMemories();};
+    document.querySelector('#show-deleted').onchange=()=>loadMemories();
+    document.querySelector('#new-memory').onclick=()=>openMemory();
+    document.querySelector('#close-memory').onclick=()=>memoryDialog.close();
+    document.querySelector('#memory-form').onsubmit=event=>{event.preventDefault();mutateMemory('',{content:document.querySelector('#edit-content').value,title:document.querySelector('#edit-title').value,kind:document.querySelector('#edit-kind').value,scope:document.querySelector('#edit-scope').value,scopeId:document.querySelector('#edit-scope-id').value,tags:document.querySelector('#edit-tags').value.split(',').map(t=>t.trim()).filter(Boolean)});};
+    document.querySelector('#forget-memory').onclick=()=>{if(confirm(tr('删除后历史原文仍然保留，可在“已删除”中恢复。继续吗？','Historical plaintext remains after deletion and is recoverable under Deleted. Continue?')))mutateMemory('/forget',{});};
     document.querySelector('#refresh').onclick=()=>load({force:true});
     document.querySelector('#language').onchange=event=>{lang=event.target.value;localStorage.setItem('memory-ferry-language',lang);applyLanguage();};
     document.querySelector('#open-add-vault').onclick=()=>addVaultDialog.showModal();

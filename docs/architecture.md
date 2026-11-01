@@ -15,9 +15,10 @@ This gives the following behavior:
 - Two devices creating different memories retain both.
 - Offline events can arrive in any order and converge to the same state.
 - Concurrent updates of the same memory use deterministic last-writer-wins semantics.
-- A partially synchronized file is ignored until it becomes valid JSON.
+- A damaged or invalid event is excluded from results with explicit diagnostics. Incomplete writes remain untouched and appear in doctor warnings.
+- Machine-local state and per-memory patches use cross-process locks. Optional expected revisions prevent stale edits. New events record parent lineage; unresolved concurrent device branches are reported and can be acknowledged through an explicit restore.
 
-The MVP scans event files directly. A future local index may accelerate large Vaults, but it must remain disposable and outside the synchronized directory.
+Readers scan event metadata and reuse a disposable local parsed-event cache. Doctor bypasses the cache to verify file contents. Optional semantic indexes also remain outside the synchronized directory. Metadata scans still scale with event count.
 
 ## Separation of state
 
@@ -32,7 +33,7 @@ Machine-local state:
 - selected Vault path
 - per-Vault device ID
 - last generated HLC
-- any future search index or cache
+- event cache, optional semantic index, and cross-process locks
 
 ## Integration boundary
 

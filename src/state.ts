@@ -6,22 +6,7 @@ import type { HybridLogicalClock, LocalState } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { pathExists, readJson, stableId, writeJsonAtomic } from "./utils.js";
 
-const stateLocks = new Map<string, Promise<void>>();
-
-async function withStateLock<T>(file: string, action: () => Promise<T>): Promise<T> {
-  const previous = stateLocks.get(file) || Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const queued = previous.then(() => gate);
-  stateLocks.set(file, queued);
-  await previous;
-  try {
-    return await action();
-  } finally {
-    release();
-    if (stateLocks.get(file) === queued) stateLocks.delete(file);
-  }
-}
+import { withFileLock } from "./locking.js";
 
 export function stateHome(env = process.env, homeDir = homedir()): string {
   return path.resolve(env.MEMORY_FERRY_HOME || env.AGENT_VAULT_HOME || path.join(homeDir, STATE_DIRECTORY));
@@ -43,6 +28,10 @@ export class StateStore {
   }
 
   async load(): Promise<LocalState> {
+    return withFileLock(this.file, () => this.loadUnlocked());
+  }
+
+  private async loadUnlocked(): Promise<LocalState> {
     if (!(await pathExists(this.file))) {
       if (this.legacyFile && await pathExists(this.legacyFile)) {
         const legacy = await readJson<LocalState>(this.legacyFile);
@@ -61,12 +50,12 @@ export class StateStore {
   }
 
   async save(state: LocalState): Promise<void> {
-    await withStateLock(this.file, () => writeJsonAtomic(this.file, state));
+    await withFileLock(this.file, () => writeJsonAtomic(this.file, state));
   }
 
   async setDefaultVault(vaultPath: string): Promise<void> {
-    await withStateLock(this.file, async () => {
-      const state = await this.load();
+    await withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       const resolved = path.resolve(vaultPath);
       state.defaultVault = resolved;
       state.vaults = [...new Set([...(state.vaults || []), resolved])];
@@ -75,16 +64,16 @@ export class StateStore {
   }
 
   async clearDefaultVault(): Promise<void> {
-    await withStateLock(this.file, async () => {
-      const state = await this.load();
+    await withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       delete state.defaultVault;
       await writeJsonAtomic(this.file, state);
     });
   }
 
   async removeVault(vaultPath: string): Promise<void> {
-    await withStateLock(this.file, async () => {
-      const state = await this.load();
+    await withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       const resolved = path.resolve(vaultPath);
       state.vaults = (state.vaults || []).filter((candidate) => path.resolve(candidate) !== resolved);
       if (state.defaultVault && path.resolve(state.defaultVault) === resolved) delete state.defaultVault;
@@ -93,8 +82,8 @@ export class StateStore {
   }
 
   async setAutoManage(enabled: boolean): Promise<void> {
-    await withStateLock(this.file, async () => {
-      const state = await this.load();
+    await withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       state.autoManage = enabled;
       await writeJsonAtomic(this.file, state);
     });
@@ -109,8 +98,8 @@ export class StateStore {
   }
 
   async deviceFor(vaultPath: string): Promise<{ deviceId: string; lastClock?: HybridLogicalClock }> {
-    return withStateLock(this.file, async () => {
-      const state = await this.load();
+    return withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       const key = stableId(path.resolve(vaultPath), 24);
       if (!state.devices[key]) {
         state.devices[key] = { deviceId: randomUUID() };
@@ -121,8 +110,8 @@ export class StateStore {
   }
 
   async nextClock(vaultPath: string, observed: HybridLogicalClock[] = []): Promise<HybridLogicalClock> {
-    return withStateLock(this.file, async () => {
-      const state = await this.load();
+    return withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
       const key = stableId(path.resolve(vaultPath), 24);
       const device = state.devices[key] || { deviceId: randomUUID() };
       const now = Date.now();

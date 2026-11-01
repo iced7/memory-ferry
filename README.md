@@ -4,7 +4,17 @@
 
 [中文说明](README.zh-CN.md) · [English user guide](docs/User-Guide.md) · [中文使用手册](docs/用户使用手册.md)
 
-> Version `0.7.0-beta.1` does not provide end-to-end encryption. Never store passwords, API keys, tokens, private keys, recovery codes, or other secrets.
+> Version `1.0.0` does not provide end-to-end encryption. Never store passwords, API keys, tokens, private keys, recovery codes, or other secrets.
+
+## Stable 1.0
+
+- Process-safe local writes, revision checks, and visible concurrent-device branches.
+- Dashboard memory search, editing, deletion, version history, and restore.
+- `doctor` reports invalid events and unfinished files; cloud sync status stays explicitly unknown.
+- Project-aware recall/context and exact-duplicate suppression in context.
+- Backward-compatible JSON event storage. Deletion retains historical plaintext.
+
+Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and limitations. End-to-end encryption remains outside this release.
 
 ## Why it exists
 
@@ -33,7 +43,7 @@
 Requires Node.js 20 or newer:
 
 ```bash
-npm install -g memory-ferry@beta
+npm install -g memory-ferry@1.0.0
 
 memory-ferry init "/path/to/your/synced/MemoryFerryVault"
 memory-ferry agents install all
@@ -42,10 +52,10 @@ memory-ferry recall "answer style"
 memory-ferry ui
 ```
 
-During the beta period, use the explicit `@beta` tag. Upgrade or uninstall with:
+Install the pinned stable version. Upgrade or uninstall with:
 
 ```bash
-npm install -g memory-ferry@beta
+npm install -g memory-ferry@1.0.0
 npm uninstall -g memory-ferry
 ```
 
@@ -66,7 +76,7 @@ For product-specific behavior, add an optional `memory-ferry.yaml` manifest and 
 
 The Windows x64 release is a portable `MemoryFerry.exe`: no installer and no separate Node.js installation are required. Put the EXE in a permanent folder and double-click it. It starts without a console window and opens the local dashboard. Use the bundled `MemoryFerry-CLI.cmd` when you need command-line output.
 
-The beta is not commercially code-signed, so Windows may show an unknown-publisher warning. Verify the included SHA-256 file and keep SmartScreen enabled.
+The Windows executable is not commercially code-signed, so Windows may show an unknown-publisher warning. Verify the included SHA-256 file and keep SmartScreen enabled.
 
 ## Storage model
 
@@ -87,7 +97,7 @@ Memory Ferry recognizes existing Agent Vault Sync installations:
 - `~/.agent-vault-sync` state is migrated to `~/.memory-ferry` when the new state does not exist.
 - `AGENT_VAULT_*` environment variables remain fallbacks for their `MEMORY_FERRY_*` replacements.
 - Reconnecting an agent removes the old managed `agent-vault` entry and writes `memory-ferry`.
-- The legacy `agent-vault` CLI alias remains available during the beta migration period.
+- The legacy `agent-vault` CLI alias remains available for backward compatibility.
 
 Back up important Vaults before upgrading and allow your sync client to finish before opening the same Vault on another computer.
 

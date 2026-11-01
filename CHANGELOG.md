@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 - 2026-11-01
+
+- Serialize machine-local state and per-memory updates across processes with crash-recoverable locks.
+- Reject stale edits when an expected revision is supplied; preserve parent lineage and expose concurrent-device branches.
+- Add doctor diagnostics, history, restore, and non-destructive duplicate discovery through CLI/MCP.
+- Add bilingual dashboard memory management with revision and Vault identity checks; reject unexpected Host headers.
+- Reduce Chinese single-character false matches, add project-scoped context, and suppress exact duplicates in context.
+- Upgrade dependencies and clear known npm audit findings.
+- Preserve v1 event compatibility and plaintext storage; deletion retains history. End-to-end encryption remains deferred.
+- Stable tags now produce normal GitHub releases, including the npm tarball.
+
+
 ## 0.7.0-beta.1 - 2026-08-28
 
 - Added open Agent Skills validation for required frontmatter, portable names, directory matching, platform constraints, and symbolic-link safety.

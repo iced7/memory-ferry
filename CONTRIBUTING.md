@@ -6,7 +6,7 @@ Thank you for helping improve Memory Ferry. Issues and pull requests may be writ
 
 ## Development / 开发
 
-Requirements: Node.js 20 or 22 and npm.
+Requirements: Node.js 20, 22, or 24 and npm.
 
 ```bash
 npm ci

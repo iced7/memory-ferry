@@ -16,11 +16,14 @@ const COMMANDS = `  ${CLI_NAME} init <folder> [--name <name>]
   ${CLI_NAME} use <folder>
   ${CLI_NAME} vaults list|remove <folder>
   ${CLI_NAME} vault migrate <source-folder> <target-folder>
-  ${CLI_NAME} status [--json]
+  ${CLI_NAME} status|doctor [--json]
+  ${CLI_NAME} history <id> [--json]
+  ${CLI_NAME} restore <id> <event-id> [--expected-revision <event-id>]
+  ${CLI_NAME} duplicates [--json]
   ${CLI_NAME} remember <text> [--title <title>] [--kind <kind>] [--scope <scope>] [--scope-id <id>] [--tag <tag> ...]
-  ${CLI_NAME} recall <query> [--limit <n>] [--no-semantic] [--json]
+  ${CLI_NAME} recall <query> [--limit <n>] [--project <id>] [--all-scopes] [--no-semantic] [--json]
   ${CLI_NAME} list|get|update|forget ...
-  ${CLI_NAME} context <query> [--limit <n>] [--no-semantic]
+  ${CLI_NAME} context <query> [--limit <n>] [--project <id>] [--all-scopes] [--no-semantic]
   ${CLI_NAME} skills list|inspect|sync [all|agent ...]
   ${CLI_NAME} agents detect|install|uninstall [all|agent ...]
   ${CLI_NAME} ui [--port <n>] [--no-open]
@@ -59,7 +62,7 @@ interface Parsed { positionals: string[]; flags: Map<string, string[]>; }
 function parse(argv: string[]): Parsed {
   const positionals: string[] = [];
   const flags = new Map<string, string[]>();
-  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic"]);
+  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic", "all-scopes"]);
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index];
     if (!token.startsWith("--") && token !== "-h") { positionals.push(token); continue; }
@@ -142,9 +145,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   const vault = await selectedVault(parsed, state);
+  const warn = () => { if (vault.diagnostics.length) console.error("Vault warning: results may be incomplete. Run memory-ferry doctor."); };
+  if (command === "doctor") { const health = await vault.health(); print(health, wantsJson); if (health.status !== 'healthy') process.exitCode = 2; return; }
+  if (command === "history") { print(await vault.history(requireArg(subcommand, 'memory ID')), wantsJson); warn(); return; }
+  if (command === "restore") { print(await vault.restore(requireArg(subcommand, 'memory ID'), requireArg(rest[0], 'event ID'), flag(parsed, 'expected-revision')), wantsJson); return; }
+  if (command === "duplicates") { print(await vault.duplicates(), wantsJson); warn(); return; }
   if (command === "mcp") { await runMcp(vault); return; }
   if (command === "status") {
-    print({ path: vault.root, manifest: await vault.manifest(), memories: (await vault.current()).size, events: (await vault.events()).length, skills: await listSkills(vault.root) }, wantsJson); return;
+    print({ path: vault.root, manifest: await vault.manifest(), memories: (await vault.current()).size, events: (await vault.events()).length, health: await vault.health(), skills: await listSkills(vault.root) }, wantsJson); return;
   }
   if (command === "remember") {
     const content = [subcommand, ...rest].filter(Boolean).join(" ");
@@ -153,22 +161,24 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === "recall") {
     const query = [subcommand, ...rest].filter(Boolean).join(" ");
-    const results = await vault.search(requireArg(query, "search query"), numberFlag(parsed, "limit", 10), { kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag"), semantic: !parsed.flags.has("no-semantic") });
+    const results = await vault.search(requireArg(query, "search query"), numberFlag(parsed, "limit", 10), { kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag"), semantic: !parsed.flags.has("no-semantic"), projectId: flag(parsed, 'project'), allScopes: parsed.flags.has('all-scopes') });
+    if (vault.diagnostics.length) console.error('Vault warning: results may be incomplete. Run memory-ferry doctor.');
     if (wantsJson) print(results, true); else print(results.length ? results.map(({ memory, score }) => `${score.toFixed(2)}  ${memory.id}  [${memory.kind}] ${memory.title ? `${memory.title}: ` : ""}${memory.content}`).join("\n") : "No matching memory.");
     return;
   }
   if (command === "list") {
     const values = await vault.list({ limit: numberFlag(parsed, "limit", 100), kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag") });
+    warn();
     if (wantsJson) print(values, true); else print(values.length ? values.map((memory) => `${memory.id}  [${memory.kind}] ${memory.title ? `${memory.title}: ` : ""}${memory.content}`).join("\n") : "No memory saved.");
     return;
   }
-  if (command === "get") { print((await vault.get(requireArg(subcommand, "memory ID"))) || { found: false }, wantsJson); return; }
+  if (command === "get") { print((await vault.get(requireArg(subcommand, "memory ID"))) || { found: false }, wantsJson); warn(); return; }
   if (command === "update") {
-    const memory = await vault.update(requireArg(subcommand, "memory ID"), { content: flag(parsed, "content"), title: flag(parsed, "title"), kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag") });
+    const memory = await vault.update(requireArg(subcommand, "memory ID"), { content: flag(parsed, "content"), title: flag(parsed, "title"), kind: flag(parsed, "kind") as MemoryKind | undefined, scope: flag(parsed, "scope") as ScopeType | undefined, scopeId: flag(parsed, "scope-id"), tags: flags(parsed, "tag") }, flag(parsed, 'expected-revision'));
     print(memory, wantsJson); return;
   }
-  if (command === "forget") { print({ id: requireArg(subcommand, "memory ID"), forgotten: await vault.forget(subcommand!) }, wantsJson); return; }
-  if (command === "context") { print(await vault.context(requireArg([subcommand, ...rest].filter(Boolean).join(" "), "context query"), numberFlag(parsed, "limit", 8), { semantic: !parsed.flags.has("no-semantic") })); return; }
+  if (command === "forget") { print({ id: requireArg(subcommand, "memory ID"), forgotten: await vault.forget(subcommand!, flag(parsed, 'expected-revision')), historicalContentRetained: true }, wantsJson); return; }
+  if (command === "context") { print(await vault.context(requireArg([subcommand, ...rest].filter(Boolean).join(" "), "context query"), numberFlag(parsed, "limit", 8), { semantic: !parsed.flags.has("no-semantic"), kind: flag(parsed,'kind') as MemoryKind | undefined, tags: flags(parsed,'tag'), scope: flag(parsed, 'scope') as ScopeType | undefined, scopeId: flag(parsed, 'scope-id'), projectId: flag(parsed, 'project'), allScopes: parsed.flags.has('all-scopes') })); if (vault.diagnostics.length) console.error('Vault warning: results may be incomplete. Run memory-ferry doctor.'); return; }
 
   const cliPath = fileURLToPath(import.meta.url);
   const context = adapterContext(vault.root, cliPath);

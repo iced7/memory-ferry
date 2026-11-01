@@ -11,7 +11,6 @@ function terms(value: string): string[] {
     result.push(chunk);
     if (/\p{Script=Han}/u.test(chunk)) {
       const characters = [...chunk].filter((character) => /[\p{L}\p{N}]/u.test(character));
-      result.push(...characters);
       for (let index = 0; index < characters.length - 1; index++) result.push(`${characters[index]}${characters[index + 1]}`);
     }
   }
@@ -34,6 +33,8 @@ export function searchMemories(memories: MemoryRecord[], query: string, limit = 
       const content = normalize(memory.content);
       const tags = memory.tags.map(normalize);
       const haystack = `${title} ${content} ${tags.join(" ")}`;
+      const coverage = queryTerms.filter(term => haystack.includes(term)).length / Math.max(1, queryTerms.length);
+      if (!haystack.includes(normalizedQuery) && coverage < 0.34) return { memory, score: 0 };
       let score = 0;
       if (title === normalizedQuery) score += 15;
       if (title.includes(normalizedQuery)) score += 8;

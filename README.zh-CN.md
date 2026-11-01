@@ -2,11 +2,21 @@
 
 一个低成本、local-first 的跨 Agent 长期记忆与 Skill 复用工具。把 Vault 放在 iCloud Drive、OneDrive、Dropbox、Syncthing 或 NAS 同步目录中，Codex、Claude Code、Cursor、OpenCode、DeepSeek Harness、Gemini CLI、GitHub Copilot CLI 和 MiniMax Code 就能读写同一份记忆。
 
-当前版本：`0.7.0-beta.1`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
+当前版本：`1.0.0`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
 
 [English README](README.md) · [English user guide](docs/User-Guide.md)
 
 第一次使用建议先阅读：[《Memory Ferry · 记忆摆渡 用户说明与使用手册》](docs/用户使用手册.md)。手册包含完整安装、跨电脑部署、各 Agent 接入、Skill 复用、命令参考、数据安全和故障排查。
+
+## 1.0 正式版
+
+- 本机多进程写入锁、修改版本检查、跨设备并发分支提醒。
+- 控制台可搜索、编辑、删除记忆，查看版本历史并恢复。
+- `doctor` 检测损坏事件和未完成文件；明确区分本机可读写与云端同步完成。
+- 按项目召回与生成上下文，上下文合并完全重复项。
+- 保持旧 JSON 事件兼容；删除仍保留历史原文。
+
+升级、回退与使用边界见 [1.0 发布说明](docs/RELEASE-1.0.md)。端到端加密单独规划，本次没有引入。
 
 ## 它解决什么
 
@@ -21,16 +31,16 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install -g memory-ferry@beta
+npm install -g memory-ferry@1.0.0
 memory-ferry ui
 ```
 
-当前为 Beta 版，请明确使用 `@beta` 标签。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
+使用固定版本号安装正式版。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
 
 升级或卸载：
 
 ```bash
-npm install -g memory-ferry@beta
+npm install -g memory-ferry@1.0.0
 npm uninstall -g memory-ferry
 ```
 
@@ -143,7 +153,10 @@ memory-ferry ui --port 47831 --no-open
 - `memory_get`
 - `memory_update`
 - `memory_forget`
-- `memory_context`（可选 `semantic`）
+- `memory_context`（可选 `semantic`、`projectId` 和范围过滤）
+- `memory_history`
+- `memory_restore`（需要 `expectedRevision`）
+- `memory_duplicates`
 - `vault_status`
 - `skill_list`
 
@@ -228,7 +241,7 @@ MemoryFerryVault/
 
 ## 安全边界
 
-- 0.7.0-beta.1 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
+- 1.0.0 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
 - MCP/CLI 不会主动读取其他聊天记录；只处理明确写入 Vault 的内容。
 - 召回内容是上下文，不是高优先级指令；当前用户指令始终优先。
 - 建议对网盘开启多因素认证，并避免把 Vault 放进公开共享目录。
