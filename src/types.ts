@@ -30,6 +30,21 @@ export interface MemoryEvent {
   createdAt: string;
   deviceId: string;
   record?: MemoryRecord;
+  parentEventId?: string | null;
+  restoredFrom?: string;
+  resolvedEventIds?: string[];
+}
+
+export interface VaultIssue { code: string; path: string; message: string; }
+export interface VaultHealth {
+  status: "healthy" | "warning";
+  sync: "unknown";
+  events: number;
+  pendingFiles: number;
+  invalidEvents: number;
+  duplicateClocks: number;
+  concurrentMemories: number;
+  issues: VaultIssue[];
 }
 
 export interface VaultManifest {
@@ -72,5 +87,8 @@ export interface ListFilter {
 }
 
 export interface SearchOptions extends ListFilter {
-  semantic?: boolean
+  semantic?: boolean;
+  projectId?: string;
+  allScopes?: boolean;
+  minSimilarity?: number;
 }

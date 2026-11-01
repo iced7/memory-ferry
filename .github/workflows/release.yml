@@ -22,6 +22,8 @@ jobs:
       - run: npm run test:all
       - run: npm run build:exe:win
       - run: node scripts/smoke-windows-exe.mjs
+      - run: npm audit --omit=dev
+      - run: npm pack
       - name: Create Windows archive
         shell: pwsh
         run: Compress-Archive -Path release\* -DestinationPath "MemoryFerry-${{ github.ref_name }}-windows-x64.zip"
@@ -29,4 +31,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "MemoryFerry-${{ github.ref_name }}-windows-x64.zip" release/MemoryFerry.exe release/MemoryFerry.exe.sha256 --generate-notes --prerelease
+        run: |
+          flags=()
+          if [[ "${{ github.ref_name }}" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "${{ github.ref_name }}" "MemoryFerry-${{ github.ref_name }}-windows-x64.zip" release/MemoryFerry.exe release/MemoryFerry.exe.sha256 memory-ferry-*.tgz --generate-notes "${flags[@]}"

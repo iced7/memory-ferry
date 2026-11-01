@@ -15,6 +15,7 @@ const bundle = path.join(buildDir, "memory-ferry-exe.cjs");
 const output = path.join(releaseDir, "MemoryFerry.exe");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const version = packageJson.version;
+const nodeVersion = "22.23.4";
 const execFileAsync = promisify(execFile);
 
 await mkdir(buildDir, { recursive: true });
@@ -43,7 +44,7 @@ if (bundleCheck.stdout.trim() !== version) {
   throw new Error(`Bundled entry point reported ${JSON.stringify(bundleCheck.stdout.trim())}; expected ${version}.`);
 }
 
-await exec([bundle, "--sea", "--targets", "node22-win-x64", "--output", output]);
+await exec([bundle, "--sea", "--targets", `node${nodeVersion}-win-x64`, "--output", output]);
 const consoleImage = await readFile(output);
 if (readPeSubsystem(consoleImage) !== WINDOWS_CUI_SUBSYSTEM) throw new Error("Expected pkg to emit a Windows console executable before patching.");
 const guiImage = setPeSubsystem(consoleImage, WINDOWS_GUI_SUBSYSTEM);
@@ -53,7 +54,7 @@ const checksum = createHash("sha256").update(guiImage).digest("hex");
 await writeFile(`${output}.sha256`, `${checksum}  MemoryFerry.exe\n`, "utf8");
 await writeFile(path.join(releaseDir, "MemoryFerry-CLI.cmd"), `@echo off\r\nstart "" /wait /b "%~dp0MemoryFerry.exe" %*\r\n`, "utf8");
 await copyFile(path.join(root, "LICENSE"), path.join(releaseDir, "LICENSE.txt"));
-const nodeLicenseResponse = await fetch("https://raw.githubusercontent.com/nodejs/node/v22.23.2/LICENSE");
+const nodeLicenseResponse = await fetch(`https://raw.githubusercontent.com/nodejs/node/v${nodeVersion}/LICENSE`);
 if (!nodeLicenseResponse.ok) throw new Error(`Unable to download the Node.js license: HTTP ${nodeLicenseResponse.status}`);
 await writeFile(path.join(releaseDir, "NODE-LICENSE.txt"), await nodeLicenseResponse.text(), "utf8");
 await execFileAsync(process.execPath, [path.join(root, "scripts", "generate-third-party-notices.mjs")]);
@@ -95,7 +96,7 @@ English
 5. Use “Exit” in the dashboard to stop the background process. Closing the browser tab alone does not stop it.
 6. Use MemoryFerry-CLI.cmd when you need command-line output.
 
-This unsigned beta may show an “Unknown publisher” warning. Verify MemoryFerry.exe.sha256 and do not disable SmartScreen. Vault contents are not end-to-end encrypted; never store credentials or recovery secrets.
+This unsigned build may show an “Unknown publisher” warning. Verify MemoryFerry.exe.sha256 and do not disable SmartScreen. Vault contents are not end-to-end encrypted; never store credentials or recovery secrets.
 `, "utf8");
 console.log(output);
 console.log(`SHA-256 ${checksum}`);

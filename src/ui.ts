@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { adapterContext, detectAgents, installAgents, skillSyncTargets, uninstallAgents, type AgentId } from "./adapters.js";
 import { migrateVault } from "./migration.js";
 import { StateStore } from "./state.js";
@@ -18,6 +19,15 @@ import { LEGACY_MANIFEST_FILE, MANIFEST_FILE, PRODUCT_NAME, VERSION } from "./br
 const execFileAsync = promisify(execFile);
 const UI_FILE = fileURLToPath(new URL("../assets/ui.html", import.meta.url));
 let embeddedUiTemplate: string | undefined;
+
+const memoryInput = z.object({
+  content: z.string().trim().min(1).max(64_000),
+  title: z.string().max(300).optional(),
+  kind: z.enum(['fact','preference','decision','lesson','note','task']).optional(),
+  scope: z.enum(['global','project','agent']).optional(),
+  scopeId: z.string().max(300).optional(),
+  tags: z.array(z.string().max(100)).max(64).optional(),
+});
 
 export const SKILL_SYNC_INTERVAL_MS = 5 * 60_000;
 export const WINDOWS_FOLDER_PICKER_SCRIPT = [
@@ -63,11 +73,15 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
-  let raw = "";
+  const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of request) {
-    raw += chunk;
-    if (raw.length > 1_000_000) throw new Error("Request body is too large.");
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > 1_000_000) throw new Error("Request body is too large.");
+    chunks.push(bytes);
   }
+  const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw) return {};
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("Expected a JSON object.");
@@ -131,10 +145,12 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
       let writable = true;
       try { await access(vaultPath, constants.R_OK | constants.W_OK); } catch { writable = false; }
       const latest = events.at(-1);
+      const health = await instance.health();
       vault = {
         path: vaultPath, manifest, provider: providerFor(vaultPath, options.platform), writable,
         memories: current.size, events: events.length, skills: skills.length,
-        latestEventAt: latest?.createdAt, latestDeviceId: latest?.deviceId
+        latestEventAt: latest?.createdAt, latestDeviceId: latest?.deviceId, health,
+        privacy: { encrypted: false, deletion: 'tombstone', historyRetained: true }
       };
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
@@ -184,6 +200,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
 
   const server = createServer(async (request, response) => {
     try {
+      if (request.headers.host !== new URL(origin).host) { json(response, 403, { error: 'Invalid host.' }); return; }
       const requestUrl = new URL(request.url || "/", origin || `http://${host}:${port}`);
       if (request.method === "GET" && requestUrl.pathname === "/") {
         response.writeHead(200, {
@@ -202,6 +219,44 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
 
       const shared = { state, cliPath: options.cliPath, homeDir, env, platform };
       if (request.method === "GET" && requestUrl.pathname === "/api/status") { json(response, 200, await dashboardStatus(shared)); return; }
+      if (requestUrl.pathname === '/api/memories' || requestUrl.pathname.startsWith('/api/memories/')) {
+        const vault = new Vault(await state.resolveVault(), state, {env});
+        const manifest = await vault.manifest();
+        const parts = requestUrl.pathname.split('/').filter(Boolean);
+        const id = parts[2] ? decodeURIComponent(parts[2]) : undefined;
+        if (request.method === 'GET' && !id) {
+          const query = requestUrl.searchParams.get('query') || '';
+          if (query.length > 4000) throw new Error('Search query is too long.');
+          const projectId = requestUrl.searchParams.get('project') || undefined;
+          const all = await vault.events();
+          const latest = new Map<string, typeof all[number]>();
+          for (const event of all) latest.set(event.memoryId, event);
+          const deleted = requestUrl.searchParams.get('deleted') === 'true';
+          const records = deleted
+            ? [...latest.values()].filter(e=>e.op==='delete').map(e=>{
+                const prior = [...all].reverse().find(p=>p.memoryId===e.memoryId && p.op==='put');
+                return prior?.record;
+              }).filter(r=>r!==undefined).filter(r=>(!projectId || r.scope.type==='global' || r.scope.type==='project' && r.scope.id===projectId) && (!query || `${r.title || ''} ${r.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())))
+            : (await vault.search(query, Number.MAX_SAFE_INTEGER, {semantic:false, projectId})).map(r=>r.memory);
+          const items = records.slice(0,200).map(record=>({record, revision:latest.get(record.id)?.eventId, deleted}));
+          json(response, 200, {vaultId:manifest.vaultId, vaultPath:vault.root, items, total:records.length, duplicates:await vault.duplicates(), warnings:vault.diagnostics}); return;
+        }
+        if (request.method === 'GET' && id) {
+          const history = await vault.history(id);
+          if (!history.length) { json(response,404,{error:'Memory not found.'}); return; }
+          json(response,200,{vaultId:manifest.vaultId, vaultPath:vault.root, history, warnings:vault.diagnostics}); return;
+        }
+        if (request.method === 'POST') {
+          const input = await body(request);
+          if (input.vaultId !== manifest.vaultId || input.vaultPath !== vault.root) throw new Error('The active Vault changed. Reload before saving.');
+          if (!id) { json(response,200,{record:await vault.remember(memoryInput.parse(input))}); return; }
+          const revision = z.string().uuid().parse(input.expectedRevision);
+          if (parts[3] === 'forget') { json(response,200,{deleted:await vault.forget(id, revision), historicalContentRetained:true}); return; }
+          if (parts[3] === 'restore') { json(response,200,{record:await vault.restore(id,z.string().uuid().parse(input.eventId),revision)}); return; }
+          if (parts.length === 3) { json(response,200,{record:await vault.update(id,memoryInput.partial().parse(input),revision)}); return; }
+        }
+        json(response,404,{error:'Memory route not found.'}); return;
+      }
       if (request.method === "POST" && requestUrl.pathname === "/api/shutdown") {
         json(response, 200, { ok: true });
         const timer = setTimeout(() => { void close(); }, 75);
@@ -284,7 +339,8 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
       }
       json(response, 404, { error: "API route not found." });
     } catch (error) {
-      json(response, 400, { error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      json(response, /changed since|active Vault changed/.test(message) ? 409 : 400, { error: message });
     }
   });
 
