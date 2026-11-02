@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 - 2026-11-02
+
+- Retry transient Windows atomic-replacement errors with bounded backoff, preserving the previous file and cleaning only the failed writer's temporary file.
+- Report background embedding failures on stderr and expose `Vault.flushEmbeddings()` to await queued work and inspect original failure causes.
+- Replace timing-based embedding assertions with completion-based assertions; add real Windows file-handle contention and recovery regression tests.
+- Run concurrent embedding lifecycle stress checks on Windows Node 20/22/24 and before release; keep all CI matrix jobs running after a failure for complete diagnostics.
+- See [verification evidence and limits](docs/verification-1.0.1.md). The original intermittent CI timeout was not reproduced in 80 unmodified lifecycle runs; file contention is a demonstrated failure mode, not a proven attribution for that historical run.
+
 ## 1.0.0 - 2026-11-01
 
 - Serialize machine-local state and per-memory updates across processes with crash-recoverable locks.

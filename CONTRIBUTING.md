@@ -11,7 +11,10 @@ Requirements: Node.js 20, 22, or 24 and npm.
 ```bash
 npm ci
 npm run test:all
+npm run test:stress
 ```
+
+Embedding tests await `Vault.flushEmbeddings()` rather than polling the cache with a short deadline. The method drains tasks queued by that Vault instance and throws an `AggregateError` with the latest (up to 20) original causes since the previous drain; normal memory commits remain independent of optional embeddings. Background failures also emit a diagnostic on stderr without memory text or vectors. Stress tests use only temporary Vaults and a synthetic embedder. On Windows, the atomic-write regression holds a real file handle without delete sharing, releases it, and verifies successful replacement.
 
 For UI changes, run `npm run dev -- ui`, test both language modes, and verify that the page does not perform full reloads. For storage or adapter changes, add migration tests and preserve support for legacy `agent-vault.json`, `AGENT_VAULT_*`, and managed Agent Vault configuration blocks.
 

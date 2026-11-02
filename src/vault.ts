@@ -153,6 +153,8 @@ export class Vault {
   readonly state: StateStore;
   readonly embedding: Required<VaultEmbeddingOptions>
   private readonly embeddingVersions = new Map<string, number>()
+  private readonly embeddingTasks = new Set<Promise<void>>()
+  private readonly embeddingErrors: Error[] = []
   private readIssues: VaultIssue[] = [];
 
   constructor(root: string, state = new StateStore(), embedding: VaultEmbeddingOptions = {}) {
@@ -384,18 +386,37 @@ export class Vault {
     const model = embeddingModel(env)
     const version = (this.embeddingVersions.get(record.id) || 0) + 1
     this.embeddingVersions.set(record.id, version)
-    void (async () => {
+    this.trackEmbedding(record.id, 'upsert', (async () => {
       if (!(await embedder.available(env))) return
       const vector = await embedder.embed(memoryEmbeddingText(record), model, env)
       if (this.embeddingVersions.get(record.id) !== version) return
       await upsertEmbedding(this.embeddingsPath, model, record.id, vector, record.updatedAt)
-    })().catch(() => undefined)
+    })())
   }
 
   private queueEmbeddingRemoval(memoryId: string): void {
     this.embeddingVersions.set(memoryId, (this.embeddingVersions.get(memoryId) || 0) + 1)
     const model = embeddingModel(this.embedding.env)
-    void removeEmbedding(this.embeddingsPath, model, memoryId).catch(() => undefined)
+    this.trackEmbedding(memoryId, 'remove', removeEmbedding(this.embeddingsPath, model, memoryId))
+  }
+
+  private trackEmbedding(memoryId: string, operation: string, task: Promise<void>): void {
+    const tracked = task.catch((cause: unknown) => {
+      const error = new Error(`Background embedding ${operation} failed for ${memoryId}`, { cause })
+      this.embeddingErrors.push(error)
+      if (this.embeddingErrors.length > 20) this.embeddingErrors.shift()
+      const code = (cause as NodeJS.ErrnoException | null)?.code || 'UNKNOWN'
+      // stderr preserves MCP stdout framing and excludes memory text/vectors.
+      console.error(`[Memory Ferry] ${error.message} (${code}); semantic search can rebuild the index.`)
+    }).finally(() => this.embeddingTasks.delete(tracked))
+    this.embeddingTasks.add(tracked)
+  }
+
+  /** Drain this instance's queued index work; report up to 20 failures since the last drain. */
+  async flushEmbeddings(): Promise<void> {
+    while (this.embeddingTasks.size) await Promise.all([...this.embeddingTasks])
+    const errors = this.embeddingErrors.splice(0)
+    if (errors.length) throw new AggregateError(errors, 'Background embedding updates failed (see causes).')
   }
 
   async search(query: string, limit = 10, options: SearchOptions = {}) {

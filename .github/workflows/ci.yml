@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
         node: [20, 22, 24]
@@ -19,6 +20,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:all
+      - name: Stress background embedding lifecycle on Windows
+        if: runner.os == 'Windows'
+        run: npm run test:stress
 
   windows-exe:
     runs-on: windows-latest

@@ -1,6 +1,6 @@
 {
   "name": "memory-ferry",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local-first, folder-synced long-term memory and reusable skills for AI agents.",
   "type": "module",
   "bin": {
@@ -24,11 +24,12 @@
   ],
   "scripts": {
     "clean": "node scripts/clean.mjs",
-    "build": "npm run clean && tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "build": "npm run clean && node scripts/check-release-version.mjs && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "build:exe:win": "npm run build && node scripts/build-windows-exe.mjs",
     "dev": "tsx src/cli.ts",
     "test": "node scripts/run-tests.mjs",
     "test:all": "npm run build && npm test",
+    "test:stress": "node scripts/stress-embeddings.mjs",
     "prepack": "npm run test:all"
   },
   "engines": {

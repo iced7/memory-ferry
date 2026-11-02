@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -38,14 +38,6 @@ async function fixture() {
   const state = new StateStore(path.join(root, 'state'))
   const vault = await Vault.init(path.join(root, 'synced'), 'Semantic Test', state, unavailableEmbedding)
   return { root, state, vault }
-}
-
-async function waitFor(check: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 2_000
-  while (!(await check())) {
-    if (Date.now() >= deadline) throw new Error('Timed out waiting for background embedding update')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
 }
 
 test('hybrid ranking blends cosine similarity with the existing text score', async () => {
@@ -154,7 +146,7 @@ test('persists embedding indexes and ignores corrupt files during search', async
   assert.equal(results[0].memory.id, memory.id)
 })
 
-test('remember, update, and forget maintain the local embedding index', async () => {
+test('remember, update, and forget maintain the local embedding index', { timeout: 30_000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-vault-embedding-lifecycle-'))
   const state = new StateStore(path.join(root, 'state'))
   const embedder: Embedder = {
@@ -167,19 +159,20 @@ test('remember, update, and forget maintain the local embedding index', async ()
   })
 
   const memory = await vault.remember({ content: 'initial value' })
-  await waitFor(async () => (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id]?.v[0] === 1)
+  await vault.flushEmbeddings()
   const createdIndex = await loadEmbeddingIndex(vault.embeddingsPath, MODEL)
   assert.deepEqual(createdIndex.vectors[memory.id], { v: [1, 0], updatedAt: memory.updatedAt })
 
   const updated = await vault.update(memory.id, { content: 'updated value' })
-  await waitFor(async () => (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id]?.v[1] === 1)
+  await vault.flushEmbeddings()
   assert.deepEqual((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id], { v: [0, 1], updatedAt: updated.updatedAt })
 
   assert.equal(await vault.forget(memory.id), true)
-  await waitFor(async () => !(memory.id in (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors))
+  await vault.flushEmbeddings()
+  assert.equal((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id], undefined)
 })
 
-test('forget prevents an in-flight embedding from restoring a stale index entry', async () => {
+test('forget prevents an in-flight embedding from restoring a stale index entry', { timeout: 30_000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-vault-embedding-race-'))
   const state = new StateStore(path.join(root, 'state'))
   let releaseEmbedding: (() => void) | undefined
@@ -206,9 +199,35 @@ test('forget prevents an in-flight embedding from restoring a stale index entry'
   await embeddingStarted
   assert.equal(await vault.forget(memory.id), true)
   releaseEmbedding?.()
-  await waitFor(async () => !(memory.id in (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors))
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await vault.flushEmbeddings()
   assert.equal((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id], undefined)
+})
+
+test('background failures are observable without losing committed memories, and later updates recover', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-ferry-embedding-error-'))
+  const warning = t.mock.method(console, 'error', () => undefined)
+  const vault = await Vault.init(path.join(root, 'synced'), 'Failure Test', new StateStore(path.join(root, 'state')), {
+    env: { AGENT_VAULT_EMBED_MODEL: MODEL },
+    embedder: { available: async () => true, embed: async () => [0, 1] },
+  })
+  // A file in place of the cache directory forces a real filesystem failure.
+  const blockedDirectory = path.dirname(vault.embeddingsPath)
+  await writeFile(blockedDirectory, 'not a directory')
+  const memory = await vault.remember({ content: 'committed despite failed embedding' })
+  let failureCode = ''
+  await assert.rejects(vault.flushEmbeddings(), (error: AggregateError) => {
+    const cause = error.errors[0].cause as NodeJS.ErrnoException
+    failureCode = cause.code || ''
+    assert.ok(['EEXIST', 'ENOTDIR'].includes(failureCode), `unexpected cause: ${cause}`)
+    return true
+  })
+  assert.equal((await vault.list())[0].content, memory.content)
+  assert.ok(String(warning.mock.calls[0].arguments[0]).includes(failureCode))
+  assert.ok(!String(warning.mock.calls[0].arguments[0]).includes(memory.content))
+  await rm(blockedDirectory)
+  const updated = await vault.update(memory.id, { content: 'recovered' })
+  await vault.flushEmbeddings()
+  assert.deepEqual((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[memory.id], { v: [0, 1], updatedAt: updated.updatedAt })
 })
 
 test('empty queries keep the existing recent-memory behavior without embedding', async () => {
@@ -291,7 +310,6 @@ test('search excludes a remotely-stale vector and re-embeds the update', async (
 
   const results = await searchVault.search('alpha')
   assert.equal(results.some((result) => result.memory.id === updated.id), false)
-  await waitFor(async () => (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[updated.id]?.updatedAt === updated.updatedAt)
   assert.deepEqual((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[updated.id], {
     v: [0, 1],
     updatedAt: updated.updatedAt,
@@ -321,7 +339,7 @@ test('search drops an embedding after a remote tombstone', async () => {
   const results = await searchVault.search('alpha')
   assert.equal(results[0].memory.id, survivor.id)
   assert.equal(results.some((result) => result.memory.id === deleted.id), false)
-  await waitFor(async () => !(deleted.id in (await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors))
+  assert.equal((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[deleted.id], undefined)
 })
 
 test('filtered search keeps embeddings for current memories outside the filter', async () => {
@@ -347,7 +365,6 @@ test('filtered search keeps embeddings for current memories outside the filter',
 
   const results = await searchVault.search('alpha', 10, { kind: 'note' })
   assert.deepEqual(results.map((result) => result.memory.id), [note.id])
-  await new Promise((resolve) => setTimeout(resolve, 20))
   assert.ok((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors[preference.id])
 })
 
@@ -370,11 +387,11 @@ test('search backfills at most 25 missing embeddings per sweep', async () => {
   })
 
   await searchVault.search('query')
-  await waitFor(async () => Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length === 25)
+  assert.equal(Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length, 25)
   assert.equal(recordEmbeddings, 25)
 
   await searchVault.search('query')
-  await waitFor(async () => Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length === 50)
+  assert.equal(Object.keys((await loadEmbeddingIndex(vault.embeddingsPath, MODEL)).vectors).length, 50)
   assert.equal(recordEmbeddings, 50)
 })
 
