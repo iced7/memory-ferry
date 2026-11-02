@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { MemoryRecord } from './types.js'
-import { isoDate, readJson, stableId, writeJsonAtomic } from './utils.js'
+import { isoDate, stableId } from './utils.js'
+import { readProtectedJson, writeProtectedJson, type JsonCodec } from './encryption.js'
 
 export type FetchFunction = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
@@ -22,6 +23,7 @@ export interface EmbeddingRefreshPlan {
 }
 
 export interface EmbeddingSweepOptions {
+  codec?: JsonCodec
   file: string
   model: string
   memories: MemoryRecord[]
@@ -122,9 +124,9 @@ export function emptyEmbeddingIndex(model: string): EmbeddingIndex {
   return { model, vectors: {} }
 }
 
-export async function loadEmbeddingIndex(file: string, fallbackModel: string): Promise<EmbeddingIndex> {
+export async function loadEmbeddingIndex(file: string, fallbackModel: string, codec?: JsonCodec): Promise<EmbeddingIndex> {
   try {
-    const value = await readJson<EmbeddingIndex>(file)
+    const value = await readProtectedJson<EmbeddingIndex>(file, codec, 'embedding-index')
     if (!value || typeof value.model !== 'string' || !value.vectors || Array.isArray(value.vectors) || typeof value.vectors !== 'object') {
       return emptyEmbeddingIndex(fallbackModel)
     }
@@ -139,22 +141,23 @@ export async function loadEmbeddingIndex(file: string, fallbackModel: string): P
   }
 }
 
-export async function writeEmbeddingIndex(file: string, index: EmbeddingIndex): Promise<void> {
-  await writeJsonAtomic(file, index)
+export async function writeEmbeddingIndex(file: string, index: EmbeddingIndex, codec?: JsonCodec): Promise<void> {
+  await writeProtectedJson(file, index, codec, 'embedding-index')
 }
 
 async function mutateEmbeddingIndex(
   file: string,
   model: string,
   mutate: (index: EmbeddingIndex) => void,
+  codec?: JsonCodec,
 ): Promise<EmbeddingIndex> {
   const previous = indexMutations.get(file) || Promise.resolve()
   let updated: EmbeddingIndex | undefined
   const next = previous.catch(() => undefined).then(async () => {
-    let index = await loadEmbeddingIndex(file, model)
+    let index = await loadEmbeddingIndex(file, model, codec)
     if (index.model !== model) index = emptyEmbeddingIndex(model)
     mutate(index)
-    await writeEmbeddingIndex(file, index)
+    await writeEmbeddingIndex(file, index, codec)
     updated = index
   })
   indexMutations.set(file, next)
@@ -172,16 +175,17 @@ export async function upsertEmbedding(
   memoryId: string,
   vector: number[],
   updatedAt = isoDate(),
+  codec?: JsonCodec,
 ): Promise<void> {
   await mutateEmbeddingIndex(file, model, (index) => {
     index.vectors[memoryId] = { v: vector, updatedAt }
-  })
+  }, codec)
 }
 
-export async function removeEmbedding(file: string, model: string, memoryId: string): Promise<void> {
+export async function removeEmbedding(file: string, model: string, memoryId: string, codec?: JsonCodec): Promise<void> {
   await mutateEmbeddingIndex(file, model, (index) => {
     delete index.vectors[memoryId]
-  })
+  }, codec)
 }
 
 export function planEmbeddingRefresh(memories: MemoryRecord[], index: EmbeddingIndex): EmbeddingRefreshPlan {
@@ -204,7 +208,7 @@ export function planEmbeddingRefresh(memories: MemoryRecord[], index: EmbeddingI
 }
 
 async function runEmbeddingSweep(options: EmbeddingSweepOptions): Promise<EmbeddingSweepResult> {
-  const { file, model, memories, plan, embedder, env, limit = 25 } = options
+  const { file, model, memories, plan, embedder, env, limit = 25, codec } = options
   const records = new Map(memories.map((memory) => [memory.id, memory]))
   const pending = [...plan.stale, ...plan.missing]
     .slice(0, Math.max(0, limit))
@@ -238,13 +242,13 @@ async function runEmbeddingSweep(options: EmbeddingSweepOptions): Promise<Embedd
 
   const removals = new Set([...plan.orphan, ...plan.stale])
   if (!removals.size && !upserts.size) {
-    return { index: await loadEmbeddingIndex(file, model), available }
+    return { index: await loadEmbeddingIndex(file, model, codec), available }
   }
 
   const index = await mutateEmbeddingIndex(file, model, (current) => {
     for (const memoryId of removals) delete current.vectors[memoryId]
     for (const [memoryId, entry] of upserts) current.vectors[memoryId] = entry
-  })
+  }, codec)
   return { index, available }
 }
 

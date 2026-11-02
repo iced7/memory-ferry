@@ -85,7 +85,7 @@ await writeFile(path.join(releaseDir, "README-Windows.txt"), `Memory Ferry · �
 - 当前 EXE 没有商业代码签名，Windows 可能显示“未知发布者”。
 - 请使用 MemoryFerry.exe.sha256 核对 SHA-256。
 - 不要关闭 Windows SmartScreen 或其他系统级安全防护。
-- 当前 Vault 没有端到端加密，请勿保存密码、Token、私钥或恢复码。
+- 记忆加密可选、默认明文。Skill 和元数据仍可见；密钥须单独备份，丢失无法恢复。
 
 English
 -------
@@ -96,7 +96,7 @@ English
 5. Use “Exit” in the dashboard to stop the background process. Closing the browser tab alone does not stop it.
 6. Use MemoryFerry-CLI.cmd when you need command-line output.
 
-This unsigned build may show an “Unknown publisher” warning. Verify MemoryFerry.exe.sha256 and do not disable SmartScreen. Vault contents are not end-to-end encrypted; never store credentials or recovery secrets.
+This unsigned build may show an “Unknown publisher” warning. Verify MemoryFerry.exe.sha256 and do not disable SmartScreen. Memory encryption is optional and defaults off. Skills and metadata remain visible. Back up the separate local key; loss is unrecoverable.
 `, "utf8");
 console.log(output);
 console.log(`SHA-256 ${checksum}`);

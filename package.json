@@ -1,6 +1,6 @@
 {
   "name": "memory-ferry",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Local-first, folder-synced long-term memory and reusable skills for AI agents.",
   "type": "module",
   "bin": {
@@ -30,6 +30,7 @@
     "test": "node scripts/run-tests.mjs",
     "test:all": "npm run build && npm test",
     "test:stress": "node scripts/stress-embeddings.mjs",
+    "test:encryption": "node scripts/smoke-encryption.mjs",
     "prepack": "npm run test:all"
   },
   "engines": {

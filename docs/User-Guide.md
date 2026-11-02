@@ -1,6 +1,6 @@
 # Memory Ferry User Guide
 
-This guide applies to `1.0.1`. See [1.0 release notes](RELEASE-1.0.md) for memory management, doctor, history, restore, and project-aware recall. For Chinese, see [用户使用手册](用户使用手册.md).
+This guide applies to `1.1.0`. See [1.0 release notes](RELEASE-1.0.md) for memory management, doctor, history, restore, and project-aware recall. Optional encrypted Vault setup, key import, and migration are covered in the [encryption guide](ENCRYPTION.md). Default plaintext use is unchanged. For Chinese, see [用户使用手册](用户使用手册.md).
 
 ## 1. What Memory Ferry does
 
@@ -28,7 +28,7 @@ Copy the release folder to a permanent location and double-click `MemoryFerry.ex
 ### Node.js installation on macOS, Windows, or Linux
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
 memory-ferry --version
 ```
 

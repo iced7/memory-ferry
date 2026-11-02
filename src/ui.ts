@@ -128,10 +128,12 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   const knownPaths = [...new Set([...(localState.vaults || []), ...(vaultPath ? [vaultPath] : [])])];
   const vaults = await Promise.all(knownPaths.map(async (knownPath) => {
     try {
-      const manifest = await new Vault(knownPath, options.state).manifest();
+      const knownVault = new Vault(knownPath, options.state);
+      const manifest = await knownVault.manifest();
+      const privacy = await knownVault.privacyStatus();
       let writable = true;
       try { await access(knownPath, constants.R_OK | constants.W_OK); } catch { writable = false; }
-      return { path: knownPath, manifest, provider: providerFor(knownPath, options.platform), writable, available: true, current: knownPath === vaultPath };
+      return { path: knownPath, manifest, privacy, provider: providerFor(knownPath, options.platform), writable: writable && !privacy.locked, available: true, current: knownPath === vaultPath };
     } catch (error) {
       return { path: knownPath, provider: providerFor(knownPath, options.platform), writable: false, available: false, current: knownPath === vaultPath, error: error instanceof Error ? error.message : String(error) };
     }
@@ -141,6 +143,10 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
   if (vaultPath) {
     try {
       const instance = new Vault(vaultPath, options.state);
+      const privacy = await instance.privacyStatus();
+      if (privacy.locked) {
+        vault = { path: vaultPath, manifest: await instance.manifest(), provider: providerFor(vaultPath, options.platform), writable: false, privacy, memories: null, events: null, skills: (await listSkills(vaultPath)).length };
+      } else {
       const [manifest, events, current, skills] = await Promise.all([instance.manifest(), instance.events(), instance.current(), listSkills(vaultPath)]);
       let writable = true;
       try { await access(vaultPath, constants.R_OK | constants.W_OK); } catch { writable = false; }
@@ -150,8 +156,9 @@ async function dashboardStatus(options: Required<Pick<UiOptions, "state" | "cliP
         path: vaultPath, manifest, provider: providerFor(vaultPath, options.platform), writable,
         memories: current.size, events: events.length, skills: skills.length,
         latestEventAt: latest?.createdAt, latestDeviceId: latest?.deviceId, health,
-        privacy: { encrypted: false, deletion: 'tombstone', historyRetained: true }
+        privacy: { ...privacy, deletion: 'tombstone', historyRetained: true }
       };
+      }
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
     }
@@ -276,14 +283,26 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
         const ids = await connectedAgentIds(previous, shared);
         const hasManifest = await pathExists(path.join(selected, MANIFEST_FILE)) || await pathExists(path.join(selected, LEGACY_MANIFEST_FILE));
         if (hasManifest) {
+          const vault = new Vault(selected, state);
+          if (input.encrypted === true && !(await vault.manifest()).encryption) throw new Error('Existing Vault is plaintext. Create an empty encrypted Vault and migrate into it.');
+          if (typeof input.keyFile === 'string' && input.keyFile.trim()) await vault.unlock(expandPath(input.keyFile.trim(), homeDir));
           await applyActiveVault(selected, ids, shared);
         } else if (input.create === true) {
-          await Vault.init(selected, typeof input.name === "string" && input.name.trim() ? input.name.trim() : path.basename(selected), state);
+          await Vault.init(selected, typeof input.name === "string" && input.name.trim() ? input.name.trim() : path.basename(selected), state, {}, { encrypted: input.encrypted === true, keyFile: typeof input.keyFile === 'string' && input.keyFile.trim() ? expandPath(input.keyFile.trim(), homeDir) : undefined });
           await applyActiveVault(selected, ids, shared);
         } else {
           throw new Error("This folder is not a Memory Ferry Vault. Enable ‘create’ to initialize it.");
         }
         json(response, 200, { ok: true, path: selected }); return;
+      }
+      if (request.method === 'POST' && ['/api/vault/unlock', '/api/vault/lock'].includes(requestUrl.pathname)) {
+        const input = await body(request);
+        const vault = new Vault(await state.resolveVault(), state);
+        const manifest = await vault.manifest();
+        if (input.vaultId !== manifest.vaultId) throw new Error('The active Vault changed. Reload before changing its key.');
+        if (requestUrl.pathname.endsWith('/unlock')) await vault.unlock(expandPath(z.string().min(1).max(4000).parse(input.keyFile), homeDir));
+        else await vault.lock();
+        json(response, 200, { ok: true }); return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/vault/switch") {
         const input = await body(request);
@@ -304,7 +323,7 @@ export async function startUiServer(options: UiOptions): Promise<UiHandle> {
         if (typeof input.source !== "string" || typeof input.target !== "string" || !input.source.trim() || !input.target.trim()) throw new Error("Source and target Vault are required.");
         const source = expandPath(input.source.trim(), homeDir);
         const target = expandPath(input.target.trim(), homeDir);
-        json(response, 200, { ok: true, result: await migrateVault(source, target) }); return;
+        json(response, 200, { ok: true, result: await migrateVault(source, target, { state, allowPlaintext: input.allowPlaintext === true }) }); return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/vault/disconnect") {
         await state.clearDefaultVault(); json(response, 200, { ok: true }); return;

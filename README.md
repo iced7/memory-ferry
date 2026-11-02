@@ -4,17 +4,17 @@
 
 [中文说明](README.zh-CN.md) · [English user guide](docs/User-Guide.md) · [中文使用手册](docs/用户使用手册.md)
 
-> Version `1.0.1` does not provide end-to-end encryption. Never store passwords, API keys, tokens, private keys, recovery codes, or other secrets.
+> Version `1.1.0` offers optional memory encryption; existing plaintext behavior remains the default. Keys require separate backup. Skills and metadata remain visible. See [encryption setup and limits](docs/ENCRYPTION.md).
 
-## Stable 1.0
+## Stable 1.1
 
 - Process-safe local writes, revision checks, and visible concurrent-device branches.
 - Dashboard memory search, editing, deletion, version history, and restore.
 - `doctor` reports invalid events and unfinished files; cloud sync status stays explicitly unknown.
 - Project-aware recall/context and exact-duplicate suppression in context.
-- Backward-compatible JSON event storage. Deletion retains historical plaintext.
+- Optional authenticated memory/history/cache encryption; default JSON Vaults remain compatible. Deletion retains history.
 
-Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and limitations. End-to-end encryption remains outside this release.
+Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and limitations. For optional encryption and key management, read the [1.1 encryption guide](docs/ENCRYPTION.md).
 
 ## Why it exists
 
@@ -43,7 +43,7 @@ Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and lim
 Requires Node.js 20 or newer:
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
 
 memory-ferry init "/path/to/your/synced/MemoryFerryVault"
 memory-ferry agents install all
@@ -55,7 +55,7 @@ memory-ferry ui
 Install the pinned stable release tarball. npm registry publication is separate; this URL does not require npm login. Upgrade or uninstall with:
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
 npm uninstall -g memory-ferry
 ```
 

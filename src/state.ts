@@ -89,6 +89,23 @@ export class StateStore {
     });
   }
 
+  async setEncryptionKey(vaultId: string, keyFile?: string, root?: string, keyId?: string): Promise<void> {
+    await withFileLock(this.file, async () => {
+      const state = await this.loadUnlocked();
+      state.encryptionKeys ||= {};
+      if (keyFile) state.encryptionKeys[vaultId] = path.resolve(keyFile);
+      else delete state.encryptionKeys[vaultId];
+      if (root && keyId) {
+        state.encryptedVaults ||= {};
+        const existing = state.encryptedVaults[root];
+        const pin = `${vaultId}/${keyId}`;
+        if (existing && existing !== pin) throw new Error('Encrypted Vault identity changed at this path. Use a new local folder.');
+        state.encryptedVaults[root] = pin;
+      }
+      await writeJsonAtomic(this.file, state);
+    });
+  }
+
   async resolveVault(explicit?: string, env = process.env): Promise<string> {
     const candidate = explicit || env.MEMORY_FERRY_PATH || env.AGENT_VAULT_PATH || (await this.load()).defaultVault;
     if (!candidate) {

@@ -20,6 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:all
+      - run: npm run test:encryption
       - name: Stress background embedding lifecycle on Windows
         if: runner.os == 'Windows'
         run: npm run test:stress

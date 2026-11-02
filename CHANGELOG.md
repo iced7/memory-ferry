@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - 2026-11-02
+
+- Add opt-in AES-256-GCM encryption for memories/history, local event caches, and embedding indexes. Default Vaults retain the v1 plaintext format.
+- Create separate random local key files; add CLI/dashboard key import, local association removal, privacy status and cross-device instructions. Keys are never put in agent configuration or synced Vaults.
+- Preserve complete histories during copy migration; re-encrypt for the target key and require explicit consent for plaintext export.
+- Reject wrong keys, modified ciphertext, and local protection downgrades; authenticate encrypted cache contents and keep old clients from opening the new format.
+- Add encryption regression tests and CLI/MCP/Windows EXE smoke checks. See [encryption scope, recovery and migration](docs/ENCRYPTION.md); Skills and metadata remain plaintext, and old plaintext copies are retained.
+
 ## 1.0.1 - 2026-11-02
 
 - Retry transient Windows atomic-replacement errors with bounded backoff, preserving the previous file and cleaning only the failed writer's temporary file.

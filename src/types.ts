@@ -48,11 +48,12 @@ export interface VaultHealth {
 }
 
 export interface VaultManifest {
-  schemaVersion: typeof SCHEMA_VERSION;
+  schemaVersion: 1 | 2;
   vaultId: string;
   name: string;
   createdAt: string;
-  format: "memory-ferry-events" | "agent-vault-events";
+  format: "memory-ferry-events" | "agent-vault-events" | "memory-ferry-encrypted-events";
+  encryption?: import('./encryption.js').EncryptionManifest;
 }
 
 export interface LocalState {
@@ -60,6 +61,8 @@ export interface LocalState {
   defaultVault?: string;
   vaults?: string[];
   autoManage?: boolean;
+  encryptionKeys?: Record<string, string>;
+  encryptedVaults?: Record<string, string>;
   devices: Record<string, { deviceId: string; lastClock?: HybridLogicalClock }>;
 }
 
