@@ -2,7 +2,7 @@
 
 一个低成本、local-first 的跨 Agent 长期记忆与 Skill 复用工具。把 Vault 放在 iCloud Drive、OneDrive、Dropbox、Syncthing 或 NAS 同步目录中，Codex、Claude Code、Cursor、OpenCode、DeepSeek Harness、Gemini CLI、GitHub Copilot CLI 和 MiniMax Code 就能读写同一份记忆。
 
-当前版本：`1.0.0`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
+当前版本：`1.0.1`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
 
 [English README](README.md) · [English user guide](docs/User-Guide.md)
 
@@ -31,7 +31,7 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
 memory-ferry ui
 ```
 
@@ -40,7 +40,7 @@ memory-ferry ui
 升级或卸载：
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.0/memory-ferry-1.0.0.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
 npm uninstall -g memory-ferry
 ```
 
@@ -241,7 +241,7 @@ MemoryFerryVault/
 
 ## 安全边界
 
-- 1.0.0 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
+- 1.0.1 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
 - MCP/CLI 不会主动读取其他聊天记录；只处理明确写入 Vault 的内容。
 - 召回内容是上下文，不是高优先级指令；当前用户指令始终优先。
 - 建议对网盘开启多因素认证，并避免把 Vault 放进公开共享目录。

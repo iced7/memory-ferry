@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import test from 'node:test'
+import { VERSION } from '../src/brand.js'
 import { StateStore } from '../src/state.js'
 import { Vault } from '../src/vault.js'
 import { testEnv, unavailableEmbedding } from './helpers.js'
@@ -35,7 +36,7 @@ test('recall and context accept --no-semantic', async () => {
 test('shows English and Chinese help for the Memory Ferry CLI', async () => {
   const base = ['--import', 'tsx', 'src/cli.ts', '--help']
   const english = await execFileAsync(process.execPath, [...base, '--lang', 'en'], { env: testEnv() })
-  assert.match(english.stdout, /Memory Ferry 1\.0\.0/)
+  assert.equal(english.stdout.split('\n')[0], `Memory Ferry ${VERSION}`)
   assert.match(english.stdout, /Cross-device|Local-first/)
   const chinese = await execFileAsync(process.execPath, [...base, '--lang', 'zh-CN'], { env: testEnv() })
   assert.match(chinese.stdout, /Memory Ferry · 记忆摆渡/)
