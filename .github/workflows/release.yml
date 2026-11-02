@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: node scripts/check-release-version.mjs "${{ github.ref_name }}"
       - run: npm run test:all
+      - run: npm run test:encryption
       - run: npm run test:stress
       - run: npm run build:exe:win
       - run: node scripts/smoke-windows-exe.mjs

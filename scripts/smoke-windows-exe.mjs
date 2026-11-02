@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readPeSubsystem, WINDOWS_GUI_SUBSYSTEM } from "./pe-subsystem.mjs";
+import { verifyEncryption } from './smoke-encryption.mjs';
 
 if (process.platform !== "win32") throw new Error("This smoke test must run on Windows.");
 
@@ -18,7 +19,11 @@ const image = await readFile(executable);
 if (readPeSubsystem(image) !== WINDOWS_GUI_SUBSYSTEM) throw new Error("MemoryFerry.exe is not marked as a Windows GUI executable.");
 
 const temporary = await mkdtemp(path.join(os.tmpdir(), "memory-ferry-exe-"));
-const env = { ...process.env, MEMORY_FERRY_HOME: path.join(temporary, "state"), MEMORY_FERRY_EMBED: "off" };
+const env = {
+  ...process.env, MEMORY_FERRY_HOME: path.join(temporary, "state"), MEMORY_FERRY_PATH: '', AGENT_VAULT_PATH: '', MEMORY_FERRY_EMBED: "off",
+  HOME: temporary, USERPROFILE: temporary, APPDATA: path.join(temporary, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(temporary, 'AppData', 'Local'),
+  CODEX_HOME: path.join(temporary, '.codex'), DSH_HOME: path.join(temporary, '.dsh'), MINIMAX_DATA_DIR: path.join(temporary, '.minimax'), XDG_CONFIG_HOME: path.join(temporary, '.config'),
+};
 const run = async (args) => (await execFileAsync(executable, args, { env, windowsHide: true, timeout: 30_000 })).stdout;
 
 const version = (await run(["--version"])).trim();
@@ -61,3 +66,4 @@ try {
 }
 
 console.log(`Verified hidden Windows GUI executable ${version}, CLI and MCP pipes, recall, and dashboard startup.`);
+await verifyEncryption(executable);

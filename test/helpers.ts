@@ -32,5 +32,7 @@ export function testEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   for (const name of Object.keys(env)) {
     if (isBlocked(name)) delete env[name]
   }
+  // UI/CLI tests must never probe or invoke a real local embedding service.
+  env.MEMORY_FERRY_EMBED = 'off'
   return env
 }

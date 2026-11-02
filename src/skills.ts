@@ -113,7 +113,7 @@ Use the Memory Ferry MCP tools when they are available.
 - Use \`memory_remember\`. Choose the narrowest useful scope: \`project\`, \`agent\`, or \`global\`.
 - Before saving a likely duplicate, use \`memory_recall\`. Update the existing memory when appropriate.
 - Use \`memory_history\` to obtain the current eventId, then pass it as \`expectedRevision\` when editing or deleting. If it changed, compare the latest history before retrying.
-- If the user asks to forget something, use \`memory_forget\`. It hides the current memory but retains historical plaintext; do not describe this as secure erasure.
+- If the user asks to forget something, use \`memory_forget\`. It hides the current memory but retains history (plaintext unless this Vault uses optional memory encryption); do not describe this as secure erasure.
 - Use \`memory_restore\` to recover a historical version and \`memory_duplicates\` to inspect likely duplicates without deleting them.
 - If a response contains a Vault warning, report the incomplete result and inspect \`vault_status\` before changing existing memories.
 

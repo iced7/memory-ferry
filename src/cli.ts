@@ -12,10 +12,13 @@ import { runUi } from "./ui.js";
 import { migrateVault } from "./migration.js";
 import { CLI_NAME, PRODUCT_NAME, PRODUCT_NAME_ZH, VERSION } from "./brand.js";
 
-const COMMANDS = `  ${CLI_NAME} init <folder> [--name <name>]
+const COMMANDS = `  ${CLI_NAME} init <folder> [--name <name>] [--encrypt] [--key-file <new-private-local-file>]
   ${CLI_NAME} use <folder>
   ${CLI_NAME} vaults list|remove <folder>
-  ${CLI_NAME} vault migrate <source-folder> <target-folder>
+  ${CLI_NAME} vault migrate <source-folder> <target-folder> [--allow-plaintext]
+  ${CLI_NAME} vault unlock <folder> --key-file <private-local-file>
+  ${CLI_NAME} vault lock <folder>
+  ${CLI_NAME} vault privacy <folder>
   ${CLI_NAME} status|doctor [--json]
   ${CLI_NAME} history <id> [--json]
   ${CLI_NAME} restore <id> <event-id> [--expected-revision <event-id>]
@@ -62,7 +65,7 @@ interface Parsed { positionals: string[]; flags: Map<string, string[]>; }
 function parse(argv: string[]): Parsed {
   const positionals: string[] = [];
   const flags = new Map<string, string[]>();
-  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic", "all-scopes"]);
+  const booleans = new Set(["json", "help", "h", "version", "no-open", "no-semantic", "all-scopes", "encrypt", "allow-plaintext"]);
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index];
     if (!token.startsWith("--") && token !== "-h") { positionals.push(token); continue; }
@@ -111,8 +114,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   if (command === "init") {
     const folder = requireArg(subcommand, "vault folder");
-    const vault = await Vault.init(folder, flag(parsed, "name") || path.basename(path.resolve(folder)), state);
-    print({ initialized: true, path: vault.root, manifest: await vault.manifest() }, wantsJson);
+    const vault = await Vault.init(folder, flag(parsed, "name") || path.basename(path.resolve(folder)), state, {}, { encrypted: parsed.flags.has('encrypt'), keyFile: flag(parsed, 'key-file') });
+    print({ initialized: true, path: vault.root, manifest: await vault.manifest(), privacy: await vault.privacyStatus() }, wantsJson);
     return;
   }
   if (command === "use") {
@@ -137,7 +140,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     throw new Error(`Use \`${CLI_NAME} vaults list|remove <folder>\`.`);
   }
   if (command === "vault" && subcommand === "migrate") {
-    print(await migrateVault(requireArg(rest[0], "source Vault folder"), requireArg(rest[1], "target Vault folder")), wantsJson); return;
+    print(await migrateVault(requireArg(rest[0], "source Vault folder"), requireArg(rest[1], "target Vault folder"), { state, allowPlaintext: parsed.flags.has('allow-plaintext') }), wantsJson); return;
+  }
+  if (command === 'vault' && ['unlock', 'lock', 'privacy'].includes(subcommand)) {
+    const vault = new Vault(requireArg(rest[0], 'Vault folder'), state);
+    if (subcommand === 'unlock') await vault.unlock(requireArg(flag(parsed, 'key-file'), 'private local key file'));
+    if (subcommand === 'lock') await vault.lock();
+    print(await vault.privacyStatus(), wantsJson); return;
   }
   if (command === "ui") {
     await runUi({ state, cliPath: fileURLToPath(import.meta.url), port: numberFlag(parsed, "port", 47831), open: !parsed.flags.has("no-open"), initialVault: flag(parsed, "vault") });

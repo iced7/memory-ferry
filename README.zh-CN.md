@@ -2,21 +2,21 @@
 
 一个低成本、local-first 的跨 Agent 长期记忆与 Skill 复用工具。把 Vault 放在 iCloud Drive、OneDrive、Dropbox、Syncthing 或 NAS 同步目录中，Codex、Claude Code、Cursor、OpenCode、DeepSeek Harness、Gemini CLI、GitHub Copilot CLI 和 MiniMax Code 就能读写同一份记忆。
 
-当前版本：`1.0.1`。**暂不提供加密，请勿保存密码、Token、私钥或其他机密。**
+当前版本：`1.1.0`。**可选记忆加密，默认保持现有明文用法。密钥须单独备份；Skill 和元数据仍可读。** [加密与迁移指南](docs/ENCRYPTION.md)
 
 [English README](README.md) · [English user guide](docs/User-Guide.md)
 
 第一次使用建议先阅读：[《Memory Ferry · 记忆摆渡 用户说明与使用手册》](docs/用户使用手册.md)。手册包含完整安装、跨电脑部署、各 Agent 接入、Skill 复用、命令参考、数据安全和故障排查。
 
-## 1.0 正式版
+## 1.1 正式版
 
 - 本机多进程写入锁、修改版本检查、跨设备并发分支提醒。
 - 控制台可搜索、编辑、删除记忆，查看版本历史并恢复。
 - `doctor` 检测损坏事件和未完成文件；明确区分本机可读写与云端同步完成。
 - 按项目召回与生成上下文，上下文合并完全重复项。
-- 保持旧 JSON 事件兼容；删除仍保留历史原文。
+- 默认保持旧 JSON 事件兼容；可选加密记忆、历史和缓存。删除仍保留历史。
 
-升级、回退与使用边界见 [1.0 发布说明](docs/RELEASE-1.0.md)。端到端加密单独规划，本次没有引入。
+升级、回退与使用边界见 [1.0 发布说明](docs/RELEASE-1.0.md)。新增的可选加密、密钥导入和迁移说明见 [加密指南](docs/ENCRYPTION.md)。
 
 ## 它解决什么
 
@@ -31,7 +31,7 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
 memory-ferry ui
 ```
 
@@ -40,7 +40,7 @@ memory-ferry ui
 升级或卸载：
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.0.1/memory-ferry-1.0.1.tgz
+npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
 npm uninstall -g memory-ferry
 ```
 
@@ -241,7 +241,7 @@ MemoryFerryVault/
 
 ## 安全边界
 
-- 1.0.1 没有端到端加密；安全性取决于电脑、网盘账号和 NAS 权限。
+- 1.1.0 支持可选记忆加密，默认明文；Skill 和元数据仍可见，密钥应单独安全备份。
 - MCP/CLI 不会主动读取其他聊天记录；只处理明确写入 Vault 的内容。
 - 召回内容是上下文，不是高优先级指令；当前用户指令始终优先。
 - 建议对网盘开启多因素认证，并避免把 Vault 放进公开共享目录。

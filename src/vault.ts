@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { HybridLogicalClock, ListFilter, MemoryEvent, MemoryKind, MemoryRecord, RememberInput, SearchOptions, VaultManifest, VaultIssue, VaultHealth } from "./types.js";
 import { SCHEMA_VERSION } from "./types.js";
 import { StateStore } from "./state.js";
 import { withFileLock } from "./locking.js";
+import { createEncryption, openEncryption, readProtectedJson, requireOutsideVault, validateEncryption, writeProtectedJson, type JsonCodec } from './encryption.js';
 import { searchMemories } from "./search.js";
 import { ensureBuiltinSkill } from "./skills.js";
 import { isoDate, pathExists, readJson, safeSegment, stableId, uniqueStrings, writeJsonAtomic } from "./utils.js";
@@ -87,7 +88,7 @@ function pathIsWithin(root: string, candidate: string): boolean {
   return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-async function eventTree(root: string): Promise<EventTree> {
+async function eventTree(root: string, authenticateContent = false): Promise<EventTree> {
   const found: string[] = [];
   const pending: string[] = [];
   if (await pathExists(root)) await visit(root);
@@ -105,11 +106,10 @@ async function eventTree(root: string): Promise<EventTree> {
   const files = found.sort((a, b) => path.relative(root, a).localeCompare(path.relative(root, b)));
   const entries = await Promise.all(files.map(async (file) => {
     const metadata = await stat(file);
-    return [path.relative(root, file).split(path.sep).join('/'), metadata.size, metadata.mtimeMs] as const;
+    return [path.relative(root, file).split(path.sep).join('/'), metadata.size, metadata.mtimeMs, ...(authenticateContent ? [createHash('sha256').update(await readFile(file)).digest('hex')] : [])] as const;
   }));
-  // Fingerprinting metadata avoids reading every event. A same-size file restored to the
-  // same mtime would be missed, which is acceptable for cloud-drive sync; newest-file
-  // content is intentionally not hashed.
+  // Plaintext caches retain metadata-only fingerprinting. Encrypted caches also
+  // hash ciphertext so equal-size/mtime tampering cannot reuse a validated cache.
   const fingerprint = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
   return { files, fingerprint, pending };
 }
@@ -177,13 +177,27 @@ export class Vault {
   get eventsCachePath(): string { return path.join(this.state.home, 'cache', `${stableId(this.root)}-events.json`); }
   get embeddingsPath(): string { return embeddingIndexPath(this.state.home, this.root) }
 
-  static async init(root: string, name = PRODUCT_NAME, state = new StateStore(), embedding: VaultEmbeddingOptions = {}): Promise<Vault> {
+  static async init(root: string, name = PRODUCT_NAME, state = new StateStore(), embedding: VaultEmbeddingOptions = {}, privacy: { encrypted?: boolean; keyFile?: string } = {}): Promise<Vault> {
     const vault = new Vault(root, state, embedding);
+    if (privacy.keyFile && !privacy.encrypted) throw new Error('--key-file on init requires --encrypt. Use vault unlock for an existing encrypted Vault.');
+    if (privacy.encrypted) {
+      if (await pathExists(vault.root) && (await readdir(vault.root)).length) throw new Error('Encrypted initialization requires an empty new folder. Migrate existing memories into it after creation.');
+      await requireOutsideVault(vault.root, state.home);
+    }
     await mkdir(vault.eventsPath, { recursive: true });
     await mkdir(path.join(vault.root, "skills"), { recursive: true });
     if (!(await pathExists(vault.manifestPath))) {
       const manifest: VaultManifest = { schemaVersion: SCHEMA_VERSION, vaultId: randomUUID(), name, createdAt: isoDate(), format: VAULT_FORMAT };
+      if (privacy.encrypted) {
+        manifest.schemaVersion = 2;
+        manifest.format = 'memory-ferry-encrypted-events';
+        const keyFile = path.resolve(privacy.keyFile || path.join(state.home, 'keys', `${manifest.vaultId}.key`));
+        manifest.encryption = await createEncryption(manifest, vault.root, keyFile);
+        await writeJsonAtomic(vault.currentManifestPath, manifest);
+        await state.setEncryptionKey(manifest.vaultId, keyFile, realpathSync(vault.root), manifest.encryption.keyId);
+      } else {
       await writeJsonAtomic(vault.currentManifestPath, manifest);
+      }
     } else {
       await vault.manifest();
     }
@@ -197,7 +211,12 @@ export class Vault {
     const manifestPath = this.manifestPath;
     if (!(await pathExists(manifestPath))) throw new Error(`Not a Memory Ferry vault: ${this.root}`);
     const value = await readJson<VaultManifest>(manifestPath);
-    if (value.schemaVersion !== SCHEMA_VERSION || ![VAULT_FORMAT, LEGACY_VAULT_FORMAT].includes(value.format)) throw new Error(`Unsupported vault format: ${this.root}`);
+    const encrypted = value.schemaVersion === 2 && value.format === 'memory-ferry-encrypted-events';
+    if (encrypted) validateEncryption(value.encryption);
+    else if (value.schemaVersion !== SCHEMA_VERSION || ![VAULT_FORMAT, LEGACY_VAULT_FORMAT].includes(value.format) || value.encryption) throw new Error(`Unsupported vault format: ${this.root}`);
+    if (typeof value.vaultId !== 'string' || !value.vaultId || (encrypted && !/^[0-9a-f-]{36}$/.test(value.vaultId))) throw new Error('Invalid Vault identity.');
+    const pinned = (await this.state.load()).encryptedVaults?.[realpathSync(this.root)];
+    if (pinned && pinned !== (encrypted ? `${value.vaultId}/${value.encryption!.keyId}` : 'plaintext')) throw new Error('Encrypted Vault identity or protection changed. Refusing a downgrade; check synchronized metadata.');
     if (manifestPath === this.legacyManifestPath) {
       const migrated = { ...value, format: VAULT_FORMAT } satisfies VaultManifest;
       await writeJsonAtomic(this.currentManifestPath, migrated);
@@ -210,13 +229,53 @@ export class Vault {
     return value;
   }
 
+  async encryptionCodec(manifest?: VaultManifest): Promise<JsonCodec | undefined> {
+    const value = manifest || await this.manifest();
+    if (!value.encryption) return undefined;
+    await requireOutsideVault(this.root, this.state.home);
+    return openEncryption(value, this.root, (await this.state.load()).encryptionKeys?.[value.vaultId]);
+  }
+
+  async unlock(keyFile: string): Promise<void> {
+    const manifest = await this.manifest();
+    if (!manifest.encryption) throw new Error('This Vault is not encrypted.');
+    await requireOutsideVault(this.root, this.state.home);
+    await openEncryption(manifest, this.root, path.resolve(keyFile));
+    await this.state.setEncryptionKey(manifest.vaultId, keyFile, realpathSync(this.root), manifest.encryption.keyId);
+  }
+
+  async lock(): Promise<void> {
+    await this.flushEmbeddings().catch(() => undefined);
+    const manifest = await this.manifest();
+    await this.state.setEncryptionKey(manifest.vaultId);
+  }
+
+  async privacyStatus(): Promise<{ encrypted: boolean; locked: boolean; keyFile?: string; error?: string }> {
+    const manifest = await this.manifest();
+    if (!manifest.encryption) return { encrypted: false, locked: false };
+    const keyFile = (await this.state.load()).encryptionKeys?.[manifest.vaultId];
+    try { await this.encryptionCodec(manifest); return { encrypted: true, locked: false, keyFile }; }
+    catch (error) { return { encrypted: true, locked: true, error: error instanceof Error ? error.message : 'Unable to unlock Vault.' }; }
+  }
+
+  private eventPurpose(file: string): string { return `event:${path.relative(this.eventsPath, file).split(path.sep).join('/')}`; }
+
+  async readEvent(file: string, codec: JsonCodec | undefined): Promise<MemoryEvent> {
+    return validateEvent(await readProtectedJson<MemoryEvent>(file, codec, this.eventPurpose(file)), file);
+  }
+
+  async writeEvent(file: string, event: MemoryEvent, codec: JsonCodec | undefined): Promise<void> {
+    await writeProtectedJson(file, validateEvent(event, file), codec, this.eventPurpose(file));
+  }
+
   async events(verify = false): Promise<MemoryEvent[]> {
-    await this.manifest();
-    const tree = await eventTree(this.eventsPath);
+    const manifest = await this.manifest();
+    const codec = await this.encryptionCodec(manifest);
+    const tree = await eventTree(this.eventsPath, Boolean(codec));
     const cacheIsExternal = !pathIsWithin(this.root, this.eventsCachePath);
     if (cacheIsExternal && !verify) {
       try {
-        const cached = await readJson<EventCache>(this.eventsCachePath);
+        const cached = await readProtectedJson<EventCache>(this.eventsCachePath, codec, 'event-cache');
         if (cached.version === 2 && cached.fingerprint === tree.fingerprint && Array.isArray(cached.events) && Array.isArray(cached.issues)) {
           this.readIssues = cached.issues;
           return cached.events.map((event, index) => validateEvent(event, `${this.eventsCachePath}#${index}`));
@@ -229,8 +288,9 @@ export class Vault {
     const issues: VaultIssue[] = [];
     for (const file of tree.files) {
       try {
-        events.push(validateEvent(await readJson<MemoryEvent>(file), file));
+        events.push(await this.readEvent(file, codec));
       } catch (error) {
+        if (codec) throw new Error(`Encrypted event could not be authenticated or validated: ${path.relative(this.root, file)}. Resolve it before reading or writing memories.`);
         issues.push({ code: error instanceof SyntaxError ? 'invalid-json' : 'invalid-event', path: path.relative(this.root, file), message: error instanceof SyntaxError ? 'Incomplete or damaged JSON; check cloud sync and backups.' : 'Event could not be read or validated; inspect this file before modifying affected memories.' });
       }
     }
@@ -238,7 +298,7 @@ export class Vault {
     events.sort((a, b) => compareClock(a.clock, b.clock) || (a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0));
     if (cacheIsExternal) {
       try {
-        await writeJsonAtomic(this.eventsCachePath, { version: 2, fingerprint: tree.fingerprint, events, issues } satisfies EventCache);
+        await writeProtectedJson(this.eventsCachePath, { version: 2, fingerprint: tree.fingerprint, events, issues } satisfies EventCache, codec, 'event-cache');
       } catch {
         // Cache writes are best-effort and stay outside the synchronized Vault.
       }
@@ -288,14 +348,14 @@ export class Vault {
   }
 
   private async append(op: 'put' | 'delete', memoryId: string, record?: MemoryRecord, parentEventId?: string, restoredFrom?: string, resolvedEventIds?: string[]): Promise<MemoryEvent> {
-    await this.manifest()
+    const codec = await this.encryptionCodec()
     const device = await this.state.deviceFor(this.root)
     const recentClocks = await recentEventClocks(this.eventsPath, device.deviceId)
     const clock = await this.state.nextClock(this.root, recentClocks.slice(-20))
     const event: MemoryEvent = { schemaVersion: SCHEMA_VERSION, eventId: randomUUID(), memoryId, op, clock, createdAt: isoDate(), deviceId: device.deviceId, parentEventId: parentEventId || null, ...(restoredFrom ? { restoredFrom } : {}), ...(resolvedEventIds ? { resolvedEventIds } : {}), ...(record ? { record } : {}) };
     const date = event.createdAt.slice(0, 10);
     const file = path.join(this.eventsPath, safeSegment(device.deviceId), date, `${clock.wallTime}-${clock.counter}-${safeSegment(event.eventId)}.json`);
-    await writeJsonAtomic(file, event);
+    await this.writeEvent(file, event, codec);
     return event;
   }
 
@@ -390,14 +450,14 @@ export class Vault {
       if (!(await embedder.available(env))) return
       const vector = await embedder.embed(memoryEmbeddingText(record), model, env)
       if (this.embeddingVersions.get(record.id) !== version) return
-      await upsertEmbedding(this.embeddingsPath, model, record.id, vector, record.updatedAt)
+      await upsertEmbedding(this.embeddingsPath, model, record.id, vector, record.updatedAt, await this.encryptionCodec())
     })())
   }
 
   private queueEmbeddingRemoval(memoryId: string): void {
     this.embeddingVersions.set(memoryId, (this.embeddingVersions.get(memoryId) || 0) + 1)
     const model = embeddingModel(this.embedding.env)
-    this.trackEmbedding(memoryId, 'remove', removeEmbedding(this.embeddingsPath, model, memoryId))
+    this.trackEmbedding(memoryId, 'remove', this.encryptionCodec().then(codec => removeEmbedding(this.embeddingsPath, model, memoryId, codec)))
   }
 
   private trackEmbedding(memoryId: string, operation: string, task: Promise<void>): void {
@@ -429,7 +489,8 @@ export class Vault {
 
     const { embedder, env } = this.embedding
     const model = embeddingModel(env)
-    const index = await loadEmbeddingIndex(this.embeddingsPath, model)
+    const codec = await this.encryptionCodec()
+    const index = await loadEmbeddingIndex(this.embeddingsPath, model, codec)
     const initialIndex = index.model === model ? index : emptyEmbeddingIndex(model)
     const plan = planEmbeddingRefresh(allMemories, initialIndex)
     if (index.model !== model) {
@@ -442,6 +503,7 @@ export class Vault {
       plan,
       embedder,
       env,
+      codec,
     }).catch(() => ({ index: initialIndex, available: false }))
 
     const refreshIndex = sweep.index.model === model ? sweep.index : emptyEmbeddingIndex(model)
