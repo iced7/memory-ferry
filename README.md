@@ -4,6 +4,8 @@
 
 [中文说明](README.zh-CN.md) · [English user guide](docs/User-Guide.md) · [中文使用手册](docs/用户使用手册.md)
 
+Need help setting up two agents and checking the result? See the [fixed-scope deployment service](docs/DEPLOYMENT-SERVICE.md) (USD 150). The software itself remains free under the MIT license.
+
 > Version `1.1.0` offers optional memory encryption; existing plaintext behavior remains the default. Keys require separate backup. Skills and metadata remain visible. See [encryption setup and limits](docs/ENCRYPTION.md).
 
 ## Stable 1.1
