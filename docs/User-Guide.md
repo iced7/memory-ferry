@@ -28,9 +28,11 @@ Copy the release folder to a permanent location and double-click `MemoryFerry.ex
 ### Node.js installation on macOS, Windows, or Linux
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
+npm install -g memory-ferry@latest
 memory-ferry --version
 ```
+
+Requires Node.js 20 or newer. Installation from the public registry does not require an npm account. Run the same command on each device to update, then restart its running dashboard and Agent MCP connections. Existing Vaults and local configuration are retained. To pin this release use `memory-ferry@1.1.0`; if a registry mirror is stale, add `--registry=https://registry.npmjs.org/`. Portable Windows EXE installations are updated separately from the [GitHub release](https://github.com/iced7/memory-ferry/releases/latest).
 
 For a source checkout:
 
