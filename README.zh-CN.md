@@ -31,18 +31,28 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
+npm install -g memory-ferry@latest
 memory-ferry ui
 ```
 
-通过 GitHub 固定版本安装正式版，无需 npm 登录；npm 仓库发布单独进行。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
+从公开的 [npm 仓库](https://www.npmjs.com/package/memory-ferry) 安装正式版，安装和更新无需 npm 登录。安装完成后会得到全局命令 `memory-ferry`，运行 `memory-ferry ui` 即可打开本机可视化控制台。
 
-升级或卸载：
+升级并检查版本：
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
+npm install -g memory-ferry@latest
+memory-ferry --version
+```
+
+卸载程序：
+
+```bash
 npm uninstall -g memory-ferry
 ```
+
+在每台设备执行相同的安装命令即可更新，也适用于原先从 `.tgz` 安装的设备。更新后重启正在运行的控制台和 Agent 的 MCP 连接。已有 Vault 和本机配置会保留，无需重新初始化。需要固定版本可用 `memory-ferry@1.1.0`；若镜像源尚未同步，在命令后加 `--registry=https://registry.npmjs.org/`。也可继续使用 [GitHub 正式版安装包](https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz)。
+
+单文件 Windows EXE 需要下载新版并替换原文件；npm 命令更新的是 Node.js 安装方式。
 
 如果只想在 Windows 上双击运行、不想安装 Node.js，请使用下方的单文件 EXE。
 

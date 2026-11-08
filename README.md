@@ -45,7 +45,7 @@ Read the [1.0 release notes](docs/RELEASE-1.0.md) for upgrade, rollback, and lim
 Requires Node.js 20 or newer:
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
+npm install -g memory-ferry@latest
 
 memory-ferry init "/path/to/your/synced/MemoryFerryVault"
 memory-ferry agents install all
@@ -54,12 +54,22 @@ memory-ferry recall "answer style"
 memory-ferry ui
 ```
 
-Install the pinned stable release tarball. npm registry publication is separate; this URL does not require npm login. Upgrade or uninstall with:
+Install from the public [npm registry](https://www.npmjs.com/package/memory-ferry); no npm login is required to install or update. Run the same command on each device to upgrade, including devices previously installed from a tarball:
 
 ```bash
-npm install -g https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz
+npm install -g memory-ferry@latest
+memory-ferry --version
+```
+
+To uninstall the program:
+
+```bash
 npm uninstall -g memory-ferry
 ```
+
+Restart any running dashboard and Agent MCP connections after updating. Existing Vaults and local configuration are retained; do not initialize a new Vault just to upgrade. Use `memory-ferry@1.1.0` to pin this release. If a registry mirror is stale, append `--registry=https://registry.npmjs.org/` to the install command. The [GitHub release tarball](https://github.com/iced7/memory-ferry/releases/download/v1.1.0/memory-ferry-1.1.0.tgz) remains an alternative.
+
+The standalone Windows EXE is updated by replacing it with the file from the new GitHub release; npm updates only the Node.js installation.
 
 The dashboard is loopback-only, opens in your browser, supports English and Chinese, manages multiple Vaults, connects or disconnects agents, reports Skill compatibility, migrates Vault contents safely, and reconciles Skills every five minutes while running.
 
